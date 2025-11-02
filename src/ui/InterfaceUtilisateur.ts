@@ -27,6 +27,53 @@ export class InterfaceUtilisateur {
         this.initialiserControles();
     }
 
+    /**
+     * Synchronise les valeurs de l'interface avec la configuration actuelle
+     */
+    public synchroniserValeurs(moteurPhysique: any, geometrie: any): void {
+        // Synchroniser la vitesse du vent
+        const sliderVent = document.getElementById('wind-speed') as HTMLInputElement;
+        const valeurVent = document.getElementById('wind-speed-value');
+        if (sliderVent && valeurVent) {
+            const vitesse = moteurPhysique.vent.parametres.vitesse;
+            sliderVent.value = vitesse.toString();
+            valeurVent.textContent = `${vitesse.toFixed(0)} km/h`;
+        }
+
+        // Synchroniser la longueur des lignes
+        const sliderLignes = document.getElementById('line-length') as HTMLInputElement;
+        const valeurLignes = document.getElementById('line-length-value');
+        if (sliderLignes && valeurLignes) {
+            const longueur = moteurPhysique.systemeLignes.longueurLignes;
+            sliderLignes.value = longueur.toString();
+            valeurLignes.textContent = `${longueur.toFixed(0)}m`;
+        }
+
+        // Synchroniser les brides
+        const parametresBrides = geometrie.parametresBrides;
+        
+        const sliderNez = document.getElementById('bridle-nez') as HTMLInputElement;
+        const valeurNez = document.getElementById('bridle-nez-value');
+        if (sliderNez && valeurNez) {
+            sliderNez.value = parametresBrides.nez.toString();
+            valeurNez.textContent = `${parametresBrides.nez.toFixed(2)}m`;
+        }
+
+        const sliderInter = document.getElementById('bridle-inter') as HTMLInputElement;
+        const valeurInter = document.getElementById('bridle-inter-value');
+        if (sliderInter && valeurInter) {
+            sliderInter.value = parametresBrides.inter.toString();
+            valeurInter.textContent = `${parametresBrides.inter.toFixed(2)}m`;
+        }
+
+        const sliderCentre = document.getElementById('bridle-centre') as HTMLInputElement;
+        const valeurCentre = document.getElementById('bridle-centre-value');
+        if (sliderCentre && valeurCentre) {
+            sliderCentre.value = parametresBrides.centre.toString();
+            valeurCentre.textContent = `${parametresBrides.centre.toFixed(2)}m`;
+        }
+    }
+
     private initialiserControles(): void {
         this.lierBouton('reset-sim', this.onReset);
         this.lierBouton('play-pause', this.onTogglePause);
@@ -146,5 +193,26 @@ export class InterfaceUtilisateur {
             <strong>Vent:</strong> ${vent.vitesse.toFixed(1)} km/h<br>
             <strong>Lignes:</strong> ${moteur.systemeLignes.longueurLignes} m
         `;
+    }
+
+    /**
+     * Met à jour l'indicateur visuel de pilotage actif.
+     */
+    public mettreAJourIndicateurPilotage(estActif: boolean, deltaLongueur: number, infosAutoPilote?: string | null): void {
+        const indicateur = document.getElementById('pilot-indicator');
+        if (!indicateur) return;
+
+        // Afficher les informations d'autopilotage si disponibles
+        if (infosAutoPilote) {
+            indicateur.classList.add('active');
+            indicateur.innerHTML = `🤖 ${infosAutoPilote.replace('\n', '<br>')}`;
+        } else if (estActif) {
+            indicateur.classList.add('active');
+            const direction = deltaLongueur > 0.1 ? 'GAUCHE ←' : deltaLongueur < -0.1 ? 'DROITE →' : 'CENTRE';
+            indicateur.textContent = `🎮 Pilotage: ${direction}`;
+        } else {
+            indicateur.classList.remove('active');
+            indicateur.textContent = '🎮 Pilotage: Repos';
+        }
     }
 }

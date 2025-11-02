@@ -5,6 +5,7 @@ import { GeometrieCerfVolant } from './cerfvolant/GeometrieCerfVolant';
 import { MoteurPhysique } from './physique/MoteurPhysique';
 import { StationControle } from './controles/StationControle';
 import { ControleurUtilisateur } from './controles/ControleurUtilisateur';
+import { AutoPilote, ModeAutoPilote } from './controles/AutoPilote';
 import { InterfaceUtilisateur } from './ui/InterfaceUtilisateur';
 
 /**
@@ -31,10 +32,9 @@ export class Simulation {
 
     // Système de logging amélioré
     private logTimer = 0;
-    private readonly logInterval = 0.1; // Mise à jour toutes les 0.1s pour un suivi fluide
+    private readonly logInterval = 0.5; // Mise à jour toutes les 0.5s pour un journal plus lisible
     private logsBuffer: string[] = []; // Buffer circulaire pour stocker les logs
-    private readonly MAX_LOG_DURATION = 5.0; // Conservation de 5 secondes d'historique
-    private readonly MAX_LOG_ENTRIES = Math.ceil(this.MAX_LOG_DURATION / this.logInterval); // ~50 entrées
+    private readonly MAX_LOG_ENTRIES = 8; // Garder les 8 dernières entrées (4 secondes d'historique)
 
     constructor(conteneur: HTMLElement) {
         this.horloge = new THREE.Clock();
@@ -52,6 +52,10 @@ export class Simulation {
         // La position sera correctement définie par reinitialiser() juste après.
         const positionInitialeTemporaire = new THREE.Vector3(10, 5, 0);
         this.moteurPhysique = new MoteurPhysique(positionInitialeTemporaire);
+        
+        // 3.5. Initialisation de l'autopilote
+        const autoPilote = new AutoPilote(this.moteurPhysique.vent);
+        this.controleurUtilisateur.initialiserAutoPilote(autoPilote);
 
         // 4. Ajout des objets visuels à la scène
         // FIX: Le cerf-volant est maintenant un conteneur, son objet 3D est dans la propriété `objet3D`.
@@ -68,6 +72,9 @@ export class Simulation {
             this.basculerPause.bind(this)
         );
         this.connecterUI();
+        
+        // Synchroniser les valeurs de l'UI avec la configuration actuelle
+        this.interfaceUtilisateur.synchroniserValeurs(this.moteurPhysique, this.cerfVolant.geometrie);
         
         // 6. Activation du mode debug par défaut
         this.cerfVolant.basculerDebug(true);
@@ -98,15 +105,20 @@ export class Simulation {
     private reinitialiser(estInitialisation = false): void {
         const longueurLignes = this.moteurPhysique.systemeLignes.longueurLignes;
         
-        // POSITION INITIALE: Le cerf-volant doit être dans le vent (X+) et en hauteur
+        // POSITION INITIALE OPTIMISÉE pour le nouveau système de lignes bi-régime
+        // Avec longueur_repos = 97% × longueur, on veut démarrer proche de longueur_repos
+        // pour être dans la zone de tension active dès le départ
+        // 
         // Vent : vient de X+ et souffle vers X-
         // Station : en (0, 0.25, 0), treuils en (0.25, 0.25, ±0.15)
         // Cerf-volant : derrière la station (X+ positif) pour être dans le vent
         const positionInitiale = new THREE.Vector3(
-            longueurLignes * 0.6,  // X+ : dans le vent, à 60% de la longueur des lignes
-            longueurLignes * 0.6,  // Y : en hauteur à 60% de la longueur
-            0                       // Z : centré sur l'axe
+            longueurLignes * 0.68,  // X+ : dans le vent, à 68% de la longueur (≈ 96% de distance réelle)
+            longueurLignes * 0.68,  // Y : en hauteur à 68%
+            0                        // Z : centré sur l'axe
         );
+        // Distance résultante ≈ √(0.68² + 0.68²) × longueur ≈ 0.96 × longueur ≈ 9.6m pour longueur=10m
+        // Cela place le cerf-volant juste en-dessous de longueur_repos (9.7m)
 
         // S'assure que le cerf-volant n'est pas sous le sol.
         if (positionInitiale.y < 3) {
@@ -115,6 +127,9 @@ export class Simulation {
 
         // Réinitialise l'état physique
         this.moteurPhysique.reinitialiser(positionInitiale);
+        
+        // Réinitialiser les tensions lissées du système de lignes
+        this.moteurPhysique.systemeLignes.reinitialiserTensionsLissees();
         
         // ORIENTATION INITIALE: Le cerf-volant doit être orienté avec l'intrados face au vent
         // Géométrie locale par défaut :
@@ -142,7 +157,17 @@ export class Simulation {
         this.reinitialiserTrajectoire();
         
         const message = estInitialisation 
-            ? "Bienvenue ! Simulation initialisée." 
+            ? `🪁 Bienvenue dans le simulateur de cerf-volant !
+            
+📋 CONTRÔLES:
+   • Flèches GAUCHE/DROITE (ou Q/D) : Piloter le cerf-volant
+   • ESPACE : Pause/Reprendre
+   • R : Réinitialiser la simulation
+
+💨 Le vent souffle de X+ vers X- (utilisez la grille pour vous repérer)
+🎯 Ajustez les paramètres dans le panneau de contrôle à droite
+
+Simulation initialisée et prête à voler !` 
             : "🔄 Simulation réinitialisée à une position stable.";
         this.interfaceUtilisateur.ajouterEntreeLog(message);
         console.log("🔄 Simulation réinitialisée");
@@ -277,8 +302,8 @@ export class Simulation {
 
         if (this.estEnPause) return;
         
-        // 1. Mettre à jour les contrôles utilisateur
-        this.controleurUtilisateur.mettreAJour(deltaTime);
+        // 1. Mettre à jour les contrôles utilisateur (avec autopilote si actif)
+        this.controleurUtilisateur.mettreAJour(deltaTime, this.moteurPhysique.etatCerfVolant);
         this.moteurPhysique.systemeLignes.setDelta(this.controleurUtilisateur.getDeltaLongueur());
 
         // 2. Mettre à jour le moteur physique
@@ -297,8 +322,14 @@ export class Simulation {
         this.mettreAJourBridesVisuelles();
         this.mettreAJourTrajectoire();
         
-        // 5. Mettre à jour l'interface utilisateur (debug, log)
+        // 5. Mettre à jour l'interface utilisateur (debug, log, indicateur de pilotage)
         this.interfaceUtilisateur.mettreAJourInfosDebug(this.moteurPhysique, this.cerfVolant);
+        const infosAutoPilote = this.controleurUtilisateur.getInfosAutoPilote(this.moteurPhysique.etatCerfVolant);
+        this.interfaceUtilisateur.mettreAJourIndicateurPilotage(
+            this.controleurUtilisateur.estActif(), 
+            this.controleurUtilisateur.getDeltaLongueur(),
+            infosAutoPilote
+        );
         this.cerfVolant.mettreAJourVecteursForces(
             this.moteurPhysique.derniereForceAero,
             this.moteurPhysique.derniereForceGravite,
@@ -315,17 +346,17 @@ export class Simulation {
             this.logTimer = 0;
             const log = this.genererRapportLog();
             
-            // Ajouter au buffer avec timestamp
+            // Ajouter au buffer avec timestamp formaté
             const timestamp = this.horloge.elapsedTime.toFixed(1);
-            this.logsBuffer.push(`[T+${timestamp}s] ${log}`);
+            this.logsBuffer.push(`━━━━━ T+${timestamp}s ━━━━━\n${log}`);
             
-            // Maintenir la taille du buffer (5 secondes d'historique)
+            // Maintenir la taille du buffer
             if (this.logsBuffer.length > this.MAX_LOG_ENTRIES) {
                 this.logsBuffer.shift();
             }
             
-            // Afficher les 10 dernières entrées (dernière seconde)
-            const recentLogs = this.logsBuffer.slice(-10).reverse().join('\n\n');
+            // Afficher toutes les entrées du buffer (plus récent en haut)
+            const recentLogs = this.logsBuffer.slice().reverse().join('\n\n');
             this.interfaceUtilisateur.remplacerLog(recentLogs);
         }
 
@@ -344,7 +375,7 @@ export class Simulation {
         const yaw = (euler.y * 180 / Math.PI).toFixed(0);
         const roll = (euler.z * 180 / Math.PI).toFixed(0);
         
-        const formatVec = (v: THREE.Vector3) => `(${v.x.toFixed(1)},${v.y.toFixed(1)},${v.z.toFixed(1)})`;
+        const formatVec = (v: THREE.Vector3) => `(${v.x.toFixed(1)}, ${v.y.toFixed(1)}, ${v.z.toFixed(1)})`;
         
         // Calcul des forces aérodynamiques totales
         const liftTotal = this.moteurPhysique.dernieresForcesAeroDetaillees
@@ -352,22 +383,71 @@ export class Simulation {
         const dragTotal = this.moteurPhysique.dernieresForcesAeroDetaillees
             .reduce((sum, f) => sum + f.forceDrag.length(), 0);
         
-        // Détails par panneau : normale, angle d'incidence, portance
+        // Détails par panneau avec formatage amélioré
         const detailsPanneaux = this.moteurPhysique.dernieresForcesAeroDetaillees.map((f, i) => {
             const dirVent = f.ventApparent.clone().normalize();
             const cosTheta = f.normaleSurface.dot(dirVent);
             const alpha = Math.asin(Math.abs(cosTheta)) * 180 / Math.PI;
-            return `P${i+1}:n${formatVec(f.normaleSurface)} cos${cosTheta.toFixed(2)} α${alpha.toFixed(0)}° L${f.forceLift.length().toFixed(1)}N`;
-        }).join(' | ');
+            const liftStr = f.forceLift.length().toFixed(1);
+            const dragStr = f.forceDrag.length().toFixed(1);
+            return `  └─ Panneau ${i+1}: α=${alpha.toFixed(0)}° | Portance=${liftStr}N | Traînée=${dragStr}N`;
+        }).join('\n');
         
-        // Rapport sur deux lignes : état général + détails panneaux
-        const rapport = `Pos:${formatVec(etat.position)} V:${etat.velocite.length().toFixed(1)}m/s ` +
-            `Orient:P${pitch}°/Y${yaw}°/R${roll}° ` +
-            `VentApp:${ventApparent.length().toFixed(1)}m/s ` +
-            `Lift:${liftTotal.toFixed(1)}N Drag:${dragTotal.toFixed(1)}N ` +
-            `TensG:${lignes.derniereTensionGauche.toFixed(1)}N TensD:${lignes.derniereTensionDroite.toFixed(1)}N\n` +
-            `    ${detailsPanneaux}`;
+        // Rapport structuré et lisible
+        const rapport = 
+`📍 POSITION & MOUVEMENT
+   Position: ${formatVec(etat.position)} m
+   Vitesse: ${etat.velocite.length().toFixed(2)} m/s ${formatVec(etat.velocite)}
+   Altitude: ${etat.position.y.toFixed(1)} m
+
+🎯 ORIENTATION
+   Tangage: ${pitch}° | Lacet: ${yaw}° | Roulis: ${roll}°
+
+💨 AÉRODYNAMIQUE
+   Vent apparent: ${ventApparent.length().toFixed(1)} m/s
+   Portance totale: ${liftTotal.toFixed(1)} N
+   Traînée totale: ${dragTotal.toFixed(1)} N
+${detailsPanneaux}
+
+🔗 TENSIONS DES LIGNES
+   Ligne gauche: ${lignes.derniereTensionGauche.toFixed(1)} N
+   Ligne droite: ${lignes.derniereTensionDroite.toFixed(1)} N
+   Delta: ${Math.abs(lignes.derniereTensionGauche - lignes.derniereTensionDroite).toFixed(1)} N`;
         
         return rapport;
+    }
+
+    /**
+     * Nettoie toutes les ressources de la simulation.
+     * À appeler avant de détruire l'instance pour éviter les fuites mémoire.
+     */
+    public dispose(): void {
+        // Nettoyer les géométries des lignes
+        if (this.lignesControle) {
+            this.lignesControle.forEach(ligne => {
+                ligne.geometry.dispose();
+                (ligne.material as THREE.Material).dispose();
+            });
+        }
+
+        // Nettoyer les brides
+        this.bridesVisuelles.forEach(bride => {
+            bride.geometry.dispose();
+            (bride.material as THREE.Material).dispose();
+        });
+
+        // Nettoyer la trajectoire
+        if (this.trajectoire) {
+            this.trajectoire.geometry.dispose();
+            (this.trajectoire.material as THREE.Material).dispose();
+        }
+
+        // Nettoyer le cerf-volant
+        this.cerfVolant.dispose();
+
+        // Nettoyer la scène
+        this.scene.dispose();
+
+        console.log('🧹 Simulation nettoyée');
     }
 }

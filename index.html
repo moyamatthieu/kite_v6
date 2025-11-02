@@ -200,6 +200,15 @@
             background: #ff9800;
         }
 
+        #pilot-indicator {
+            color: #888;
+        }
+
+        #pilot-indicator.active {
+            color: #4fc3f7;
+            text-shadow: 0 0 8px rgba(79, 195, 247, 0.6);
+        }
+
         .debug-info {
             font-family: 'Courier New', monospace;
             font-size: 12px;
@@ -285,6 +294,36 @@
             <h3>🔍 Informations de Debug</h3>
             <div class="debug-info" id="debug-info">
                 Activez le mode debug pour voir les informations...
+            </div>
+            
+            <!-- Indicateur de pilotage -->
+            <div style="margin-top: 15px; padding: 10px; background: rgba(0, 0, 0, 0.5); border-radius: 5px;">
+                <div id="pilot-indicator" style="font-weight: bold; font-family: 'Courier New', monospace; font-size: 13px; transition: color 0.2s;">
+                    🎮 Pilotage: Repos
+                </div>
+            </div>
+            
+            <!-- Aide Autopilote -->
+            <div style="margin-top: 15px; padding: 10px; background: rgba(0, 100, 255, 0.2); border-radius: 5px; border: 1px solid rgba(0, 150, 255, 0.5);">
+                <div style="font-weight: bold; margin-bottom: 8px; color: #4da6ff;">🤖 Autopilote</div>
+                <div style="font-size: 11px; line-height: 1.6; font-family: 'Courier New', monospace;">
+                    <strong>A</strong> : Activer/Désactiver<br>
+                    <strong>1</strong> : Manuel<br>
+                    <strong>2</strong> : Stabilisation<br>
+                    <strong>3</strong> : Maintien altitude<br>
+                    <strong>4</strong> : Maintien position<br>
+                    <strong>5</strong> : Trajectoire circulaire<br>
+                    <strong>6</strong> : Mode acrobatique
+                </div>
+            </div>
+            
+            <!-- Aide pilotage manuel -->
+            <div style="margin-top: 10px; padding: 10px; background: rgba(255, 100, 0, 0.2); border-radius: 5px; border: 1px solid rgba(255, 150, 0, 0.5);">
+                <div style="font-weight: bold; margin-bottom: 8px; color: #ff9944;">🎮 Pilotage Manuel</div>
+                <div style="font-size: 11px; line-height: 1.6; font-family: 'Courier New', monospace;">
+                    <strong>Q / ←</strong> : Tirer à gauche<br>
+                    <strong>D / →</strong> : Tirer à droite
+                </div>
             </div>
         </div>
 
