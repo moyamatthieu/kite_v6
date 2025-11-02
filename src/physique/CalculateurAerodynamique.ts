@@ -84,6 +84,12 @@ export class CalculateurAerodynamique {
                 Cd = 1.2 * sinAlpha;
             }
             
+            // SÉCURITÉ : Limiter les coefficients pour éviter valeurs explosives
+            // Cl max réaliste pour un cerf-volant : ~1.5-2.0
+            // Cd max réaliste : ~1.2-1.5
+            Cl = Math.min(Cl, 2.0);
+            Cd = Math.min(Cd, 1.5);
+            
             // Note : Cl est toujours positif. La direction du lift est gérée automatiquement
             // par le produit vectoriel qui suit, en fonction de l'orientation de la normale.
 
@@ -106,6 +112,17 @@ export class CalculateurAerodynamique {
             const forceLift = liftDirection.clone().multiplyScalar(Cl * pressionDynamique * surface);
             
             const forceTotalePanneau = new THREE.Vector3().add(forceLift).add(forceDrag);
+            
+            // SÉCURITÉ : Limiter la force totale par panneau pour éviter explosions
+            // Force max réaliste par panneau (~0.2m²) : ~15-20N en conditions extrêmes
+            const forceMaxParPanneau = 20; // N
+            if (forceTotalePanneau.lengthSq() > forceMaxParPanneau * forceMaxParPanneau) {
+                forceTotalePanneau.normalize().multiplyScalar(forceMaxParPanneau);
+                // Recalculer lift et drag proportionnellement
+                const ratio = forceMaxParPanneau / Math.sqrt(forceLift.lengthSq() + forceDrag.lengthSq());
+                forceLift.multiplyScalar(ratio);
+                forceDrag.multiplyScalar(ratio);
+            }
 
             // Calcul de la composante normale de la force aéro totale
             const forceNormale = normaleMonde.clone().multiplyScalar(forceTotalePanneau.dot(normaleMonde));

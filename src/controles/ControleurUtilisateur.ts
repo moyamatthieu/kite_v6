@@ -65,14 +65,15 @@ export class ControleurUtilisateur {
         // Les autres touches ne fonctionnent que si l'autopilote est actif
         if (!this.autoPilote.estActif()) return;
         
-        // Chiffres 1-6 pour changer de mode
+        // Chiffres 1-7 pour changer de mode
         const modes: { [key: string]: ModeAutoPilote } = {
             '1': ModeAutoPilote.MANUEL,
             '2': ModeAutoPilote.STABILISATION,
             '3': ModeAutoPilote.MAINTIEN_ALTITUDE,
             '4': ModeAutoPilote.MAINTIEN_POSITION,
-            '5': ModeAutoPilote.TRAJECTOIRE_CIRCULAIRE,
-            '6': ModeAutoPilote.ACROBATIQUE
+            '5': ModeAutoPilote.ZENITH,
+            '6': ModeAutoPilote.TRAJECTOIRE_CIRCULAIRE,
+            '7': ModeAutoPilote.ACROBATIQUE
         };
         
         if (modes[key]) {

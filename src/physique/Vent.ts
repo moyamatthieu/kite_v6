@@ -15,7 +15,7 @@ export class Vent {
 
     constructor() {
         this.parametres = {
-            vitesse: 31,
+            vitesse: 15,
             turbulence: 0,
         };
         this.vecteurVentGlobal = new THREE.Vector3();
@@ -46,6 +46,15 @@ export class Vent {
             ventAvecTurbulence.y += (Math.sin(this.tempsEcoule * 1.5) * forceTurbulence) / 4;
         }
 
-        return ventAvecTurbulence.sub(velociteCerfVolant);
+        const ventApparent = ventAvecTurbulence.sub(velociteCerfVolant);
+        
+        // SÉCURITÉ : Limiter le vent apparent pour éviter explosions aérodynamiques
+        // Un vent apparent > 20 m/s (72 km/h) indique généralement une erreur numérique
+        const vitesseMax = 20; // m/s
+        if (ventApparent.lengthSq() > vitesseMax * vitesseMax) {
+            ventApparent.normalize().multiplyScalar(vitesseMax);
+        }
+        
+        return ventApparent;
     }
 }

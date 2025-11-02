@@ -388,4 +388,30 @@ export class CerfVolant {
             this.a_forcesSurfacesAeroTotale[i].visible = false;
         }
     }
+
+    /**
+     * Nettoie toutes les ressources du cerf-volant.
+     * Libère les géométries, matériaux et textures pour éviter les fuites mémoire.
+     */
+    public dispose(): void {
+        // Nettoyer toutes les géométries et matériaux des enfants
+        this.objet3D.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+                child.geometry.dispose();
+                if (Array.isArray(child.material)) {
+                    child.material.forEach(mat => mat.dispose());
+                } else {
+                    child.material.dispose();
+                }
+                // Nettoyer les textures si présentes
+                if (child.material && 'map' in child.material && child.material.map) {
+                    child.material.map.dispose();
+                }
+            }
+        });
+
+        // Nettoyer les matériaux principaux
+        this.materiauStructure.dispose();
+        this.materiauToile.dispose();
+    }
 }

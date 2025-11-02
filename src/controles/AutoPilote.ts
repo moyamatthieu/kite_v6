@@ -10,6 +10,7 @@ export enum ModeAutoPilote {
     STABILISATION = 'stabilisation',
     MAINTIEN_ALTITUDE = 'maintien_altitude',
     MAINTIEN_POSITION = 'maintien_position',
+    ZENITH = 'zenith',
     TRAJECTOIRE_CIRCULAIRE = 'trajectoire_circulaire',
     ACROBATIQUE = 'acrobatique'
 }
@@ -113,6 +114,10 @@ export class AutoPilote {
             case ModeAutoPilote.MAINTIEN_POSITION:
                 this.positionCible.copy(etatPhysique.position);
                 break;
+            case ModeAutoPilote.ZENITH:
+                // Position zénith : directement au-dessus (X=0, Z=0) à altitude maximale
+                this.positionCible.set(0, this.ALTITUDE_MAX, 0);
+                break;
             case ModeAutoPilote.TRAJECTOIRE_CIRCULAIRE:
                 this.centreCircle.copy(etatPhysique.position);
                 this.angleCirculaire = 0;
@@ -188,6 +193,9 @@ export class AutoPilote {
                 deltaCommande = this.calculerMaintienAltitude(etatPhysique, deltaTime);
                 break;
             case ModeAutoPilote.MAINTIEN_POSITION:
+                deltaCommande = this.calculerMaintienPosition(etatPhysique, deltaTime);
+                break;
+            case ModeAutoPilote.ZENITH:
                 deltaCommande = this.calculerMaintienPosition(etatPhysique, deltaTime);
                 break;
             case ModeAutoPilote.TRAJECTOIRE_CIRCULAIRE:
@@ -408,6 +416,12 @@ export class AutoPilote {
                 const distance = etatPhysique.position.distanceTo(this.positionCible);
                 info += `Position cible: (${this.positionCible.x.toFixed(1)}, ${this.positionCible.y.toFixed(1)}, ${this.positionCible.z.toFixed(1)})\n`;
                 info += `Distance: ${distance.toFixed(2)}m`;
+                break;
+            case ModeAutoPilote.ZENITH:
+                const distanceZenith = etatPhysique.position.distanceTo(this.positionCible);
+                info += `☀️ Position ZÉNITH\n`;
+                info += `Altitude cible: ${this.ALTITUDE_MAX}m\n`;
+                info += `Distance: ${distanceZenith.toFixed(2)}m`;
                 break;
             case ModeAutoPilote.TRAJECTOIRE_CIRCULAIRE:
                 info += `Rayon: ${this.rayonCirculaire.toFixed(1)}m\n`;

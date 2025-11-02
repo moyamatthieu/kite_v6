@@ -115,4 +115,33 @@ export class Scene {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.labelRenderer.setSize(window.innerWidth, window.innerHeight);
     }
+
+    /**
+     * Nettoie toutes les ressources de la scène.
+     * Libère le renderer, les contrôles et retire les event listeners.
+     */
+    public dispose(): void {
+        // Retirer l'event listener
+        window.removeEventListener('resize', this.onRedimensionner.bind(this));
+
+        // Nettoyer tous les objets de la scène
+        this.scene.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+                child.geometry.dispose();
+                if (Array.isArray(child.material)) {
+                    child.material.forEach(mat => mat.dispose());
+                } else {
+                    child.material.dispose();
+                }
+            }
+        });
+
+        // Nettoyer les contrôles
+        this.controles.dispose();
+
+        // Nettoyer les renderers
+        this.renderer.dispose();
+        this.renderer.domElement.remove();
+        this.labelRenderer.domElement.remove();
+    }
 }

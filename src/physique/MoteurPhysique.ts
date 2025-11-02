@@ -113,15 +113,19 @@ export class MoteurPhysique {
         // 4. Intégration du mouvement avec amortissement numérique pour stabilité
         const acceleration = forceTotale.clone().divideScalar(etat.masse);
         
-        // Amortissement de stabilisation (simule la résistance de l'air non modélisée)
-        const facteurAmortissement = 0.98; // 2% de perte par frame (~20% par seconde)
-        etat.velocite.multiplyScalar(facteurAmortissement);
+        // IMPORTANT: Appliquer l'accélération AVANT l'amortissement pour permettre au cerf-volant
+        // de décoller du sol. L'amortissement ne doit pas annuler l'accélération initiale.
         etat.velocite.add(acceleration.multiplyScalar(deltaTime));
+        
+        // Amortissement de stabilisation (simule la résistance de l'air non modélisée)
+        // Appliqué APRÈS l'accélération pour ne pas bloquer les petits mouvements
+        const facteurAmortissement = 0.99; // Réduit de 0.98 à 0.99 pour moins de friction
+        etat.velocite.multiplyScalar(facteurAmortissement);
         
         // Utilisation de l'inertie pour un calcul physiquement correct de l'accélération angulaire
         const accelerationAngulaire = coupleTotal.clone().divide(etat.inertie);
-        etat.velociteAngulaire.multiplyScalar(facteurAmortissement); // Amortissement angulaire aussi
         etat.velociteAngulaire.add(accelerationAngulaire.multiplyScalar(deltaTime));
+        etat.velociteAngulaire.multiplyScalar(facteurAmortissement); // Amortissement angulaire APRÈS aussi
 
         // Garde-fou contre les valeurs NaN ou infinies
         if (!isFinite(etat.velocite.x) || !isFinite(etat.velocite.y) || !isFinite(etat.velocite.z)) {

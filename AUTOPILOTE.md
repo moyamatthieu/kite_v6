@@ -29,7 +29,14 @@ Maintient le cerf-volant à la position 3D actuelle (X, Y, Z).
 - **Paramètres latéraux** : Kp=1.2, Ki=0.08, Kd=0.4
 - **Limites** : Distance horizontale max 20m, altitude 3-15m
 
-### 5. Trajectoire Circulaire (Touche `5`)
+### 5. Position Zénith (Touche `5`) ☀️
+Positionne automatiquement le cerf-volant au zénith, directement au-dessus de la station de contrôle.
+- **Utilité** : Position la plus stable, exposition maximale au soleil, point de référence
+- **Position cible** : (X=0, Y=15m, Z=0) - altitude maximale au centre
+- **Contrôleur** : Identique au maintien de position 3D
+- **Avantage** : Position optimale pour observer la physique sans dérive latérale
+
+### 6. Trajectoire Circulaire (Touche `6`)
 Fait voler le cerf-volant en cercle autour de sa position initiale.
 - **Utilité** : Démonstration, figures automatiques
 - **Paramètres** :
@@ -37,7 +44,7 @@ Fait voler le cerf-volant en cercle autour de sa position initiale.
   - Vitesse angulaire : 0.5 rad/s (~30°/s)
 - **Configuration** : `setRayonCirculaire(rayon)` pour modifier
 
-### 6. Mode Acrobatique (Touche `6`)
+### 7. Mode Acrobatique (Touche `7`)
 Exécute des figures acrobatiques préprogrammées.
 - **Séquences disponibles** :
   - `loop` : Looping avec oscillations sinusoïdales fortes
@@ -50,13 +57,13 @@ Exécute des figures acrobatiques préprogrammées.
 
 ### Touches Clavier
 - **A** : Active/désactive l'autopilote
-- **1-6** : Change le mode (autopilote doit être actif)
+- **1-7** : Change le mode (autopilote doit être actif)
 - **Q/←** : Pilotage manuel gauche (désactive autopilote)
 - **D/→** : Pilotage manuel droite (désactive autopilote)
 
 ### Workflow Typique
 1. Appuyer sur **A** pour activer l'autopilote
-2. Appuyer sur **2-6** pour sélectionner un mode
+2. Appuyer sur **2-7** pour sélectionner un mode
 3. Observer le comportement dans l'indicateur de pilotage
 4. Appuyer sur **A** pour reprendre le contrôle manuel
 

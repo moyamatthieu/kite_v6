@@ -40,16 +40,16 @@ export class SolveurContraintes {
 
             // Réponse physique à l'impact : coefficient de restitution réaliste
             if (etat.velocite.y < 0) {
-                etat.velocite.y *= -0.4; // Rebond modéré pour un objet léger en toile
+                etat.velocite.y *= -0.5; // Rebond modéré pour un objet léger en toile
             }
             
-            // Friction au sol pour les mouvements horizontaux
-            const frictionCoeff = 0.85; // Friction réaliste pour de la toile sur le sol
+            // Friction au sol pour les mouvements horizontaux - RÉDUITE pour permettre le décollage
+            const frictionCoeff = 0.95; // Réduit de 0.85 à 0.95 pour moins bloquer le cerf-volant
             etat.velocite.x *= frictionCoeff;
             etat.velocite.z *= frictionCoeff;
             
-            // Amortissement de rotation au contact du sol
-            etat.velociteAngulaire.multiplyScalar(0.7);
+            // Amortissement de rotation au contact du sol - RÉDUIT aussi
+            etat.velociteAngulaire.multiplyScalar(0.9); // Réduit de 0.7 à 0.9
         }
     }
 }

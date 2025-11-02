@@ -168,14 +168,18 @@ export class GeometrieCerfVolant {
 
     /**
      * Vérifie que les distances calculées correspondent aux paramètres des brides.
+     * Logs désactivés par défaut pour la production.
      */
     private verifierDistancesBrides(
         nez: THREE.Vector3,
         inter: THREE.Vector3,
         centre: THREE.Vector3,
         ctrl: THREE.Vector3,
-        parametres: ParametresBrides
+        parametres: ParametresBrides,
+        debug = false // Activer si nécessaire pour le debugging
     ): void {
+        if (!debug) return; // Skip en production
+        
         const distNez = nez.distanceTo(ctrl);
         const distInter = inter.distanceTo(ctrl);
         const distCentre = centre.distanceTo(ctrl);
