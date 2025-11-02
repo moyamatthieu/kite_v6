@@ -93,21 +93,12 @@ export class MoteurPhysique {
             });
         }
 
-        // 3. FORCES DES LIGNES
-        const { force: forceLignes, couple: coupleLignes } = this.systemeLignes.calculerForces(
-            etat,
-            positionsPoignees,
-            geometrie
-        );
+        // 3. Les lignes sont maintenant gérées comme des CONTRAINTES, pas des forces
+        // On les applique après l'intégration du mouvement
         
-        // Stocker la force aéro + gravité (avant d'ajouter les lignes)
+        // Stocker la force aéro + gravité (sans les lignes)
         this.derniereForceAeroEtGravite.copy(forceTotale);
-        
-        forceTotale.add(forceLignes);
-        coupleTotal.add(coupleLignes);
-
-        // Stocker les forces totales pour le logging
-        this.derniereForceLignes.copy(forceLignes);
+        this.derniereForceLignes.set(0, 0, 0); // Plus de forces de lignes directes
         this.derniereForceTotale.copy(forceTotale);
 
         // 4. Intégration du mouvement avec amortissement numérique pour stabilité
@@ -166,7 +157,11 @@ export class MoteurPhysique {
             }
         }
         
-        // 6. Résolution des contraintes (sol)
+        // 6. Application des contraintes géométriques des lignes
+        // Ceci corrige la position/orientation pour maintenir la bonne distance aux poignées
+        this.systemeLignes.appliquerContraintes(etat, positionsPoignees, geometrie);
+        
+        // 7. Résolution des contraintes (sol)
         this.solveurContraintes.appliquerContraintes(etat, geometrie);
     }
 }

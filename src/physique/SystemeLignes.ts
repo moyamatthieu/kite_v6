@@ -3,15 +3,12 @@ import { EtatPhysique } from './EtatPhysique';
 import { GeometrieCerfVolant } from '../cerfvolant/GeometrieCerfVolant';
 
 /**
- * Gère les propriétés et les forces des lignes de contrôle.
+ * Gère les lignes de contrôle avec une contrainte géométrique simple.
+ * Au lieu de forces de ressort, on maintient une distance fixe entre les poignées et les points d'attache.
  */
 export class SystemeLignes {
     private _longueurBaseLignes: number;
     private deltaLongueur = 0; // Différence de longueur entre les lignes
-    
-    // Paramètres physiques pour des lignes avec comportement réaliste
-    public raideur = 5000; // N/m - rigide mais pas trop pour éviter les chocs
-    public amortissement = 100; // Ns/m - amortissement très élevé pour stabilité
 
     // Pour le logging et le debug
     public derniereTensionGauche = 0;
@@ -35,95 +32,83 @@ export class SystemeLignes {
         this.deltaLongueur = delta;
     }
 
-    public calculerForces(
+    /**
+     * Applique une contrainte géométrique simple : les points d'attache doivent rester
+     * à une distance fixe des poignées. Pas de forces, juste une correction de position.
+     */
+    public appliquerContraintes(
         etat: EtatPhysique,
         positionsPoignees: { gauche: THREE.Vector3; droite: THREE.Vector3 },
         geometrie: GeometrieCerfVolant
-    ): { force: THREE.Vector3; couple: THREE.Vector3 } {
-        const forceTotale = new THREE.Vector3();
-        const coupleTotal = new THREE.Vector3();
-        
-        this.derniereTensionGauche = 0;
-        this.derniereTensionDroite = 0;
-        this.derniereForceGauche.set(0, 0, 0);
-        this.derniereForceDroite.set(0, 0, 0);
-
+    ): void {
         const pointCtrlGaucheLocal = geometrie.points.get('CTRL_GAUCHE');
         const pointCtrlDroitLocal = geometrie.points.get('CTRL_DROIT');
 
+        if (!pointCtrlGaucheLocal || !pointCtrlDroitLocal) return;
+
         // Calcule les longueurs individuelles des lignes
-        // delta > 0 = virage à gauche -> ligne gauche plus courte
         const longueurGauche = this._longueurBaseLignes - this.deltaLongueur / 2;
         const longueurDroite = this._longueurBaseLignes + this.deltaLongueur / 2;
 
-        if (pointCtrlGaucheLocal && pointCtrlDroitLocal) {
-            const resultG = this.calculerForcePourUneLigne(etat, pointCtrlGaucheLocal, positionsPoignees.gauche, longueurGauche);
-            if (resultG) {
-                forceTotale.add(resultG.force);
-                coupleTotal.add(resultG.couple);
-                this.derniereTensionGauche = resultG.tension;
-                this.derniereForceGauche.copy(resultG.force);
-            }
+        // Points d'attache dans le référentiel monde
+        const pointGauche = pointCtrlGaucheLocal.clone().applyQuaternion(etat.orientation).add(etat.position);
+        const pointDroit = pointCtrlDroitLocal.clone().applyQuaternion(etat.orientation).add(etat.position);
 
-            const resultD = this.calculerForcePourUneLigne(etat, pointCtrlDroitLocal, positionsPoignees.droite, longueurDroite);
-            if (resultD) {
-                forceTotale.add(resultD.force);
-                coupleTotal.add(resultD.couple);
-                this.derniereTensionDroite = resultD.tension;
-                this.derniereForceDroite.copy(resultD.force);
-            }
+        // Vecteurs vers les poignées
+        const versPoigneeGauche = new THREE.Vector3().subVectors(positionsPoignees.gauche, pointGauche);
+        const versPoigneeDroite = new THREE.Vector3().subVectors(positionsPoignees.droite, pointDroit);
+
+        const distGauche = versPoigneeGauche.length();
+        const distDroite = versPoigneeDroite.length();
+
+        // Calcul du milieu entre les deux points d'attache
+        const milieu = new THREE.Vector3().addVectors(pointGauche, pointDroit).multiplyScalar(0.5);
+
+        // Correction de position : ramener le cerf-volant vers les poignées
+        let correctionTotale = new THREE.Vector3();
+        let nbCorrections = 0;
+
+        if (distGauche > longueurGauche) {
+            const correction = versPoigneeGauche.normalize().multiplyScalar(distGauche - longueurGauche);
+            correctionTotale.add(correction);
+            nbCorrections++;
+            this.derniereTensionGauche = distGauche - longueurGauche;
+        } else {
+            this.derniereTensionGauche = 0;
         }
 
-        return { force: forceTotale, couple: coupleTotal };
-    }
-
-    private calculerForcePourUneLigne(
-        etat: EtatPhysique, 
-        pointLocal: THREE.Vector3, 
-        poignee: THREE.Vector3,
-        longueurLigne: number
-    ): { force: THREE.Vector3; couple: THREE.Vector3; tension: number } {
-        const pointMonde = pointLocal.clone().applyQuaternion(etat.orientation).add(etat.position);
-        
-        // Calcul de la vitesse du point d'attache (vitesse du CdM + vitesse tangentielle)
-        const r_world = pointLocal.clone().applyQuaternion(etat.orientation);
-        const tangential_velocity = etat.velociteAngulaire.clone().cross(r_world);
-        const velocitePoint = etat.velocite.clone().add(tangential_velocity);
-
-        const diff = new THREE.Vector3().subVectors(pointMonde, poignee);
-        const distance = diff.length();
-        
-        // Ligne détendue : pas de force
-        if (distance <= longueurLigne) {
-            return { force: new THREE.Vector3(), couple: new THREE.Vector3(), tension: 0 };
+        if (distDroite > longueurDroite) {
+            const correction = versPoigneeDroite.normalize().multiplyScalar(distDroite - longueurDroite);
+            correctionTotale.add(correction);
+            nbCorrections++;
+            this.derniereTensionDroite = distDroite - longueurDroite;
+        } else {
+            this.derniereTensionDroite = 0;
         }
 
-        const direction = diff.normalize();
-        
-        // Calcul de la force élastique (rappel)
-        const elongation = distance - longueurLigne;
-        const forceRappel = this.raideur * elongation;
-        
-        // Calcul de la force d'amortissement (projection de la vitesse sur la direction)
-        const velociteRelative = velocitePoint.dot(direction);
-        const forceAmortissement = this.amortissement * velociteRelative;
-
-        // Force totale = rappel + amortissement
-        const magnitudeForce = forceRappel + forceAmortissement;
-
-        // Limite de tension maximale pour éviter des forces explosives
-        const tensionMax = 200; // N - réduit pour plus de douceur
-        const magnitudeForceClampee = Math.max(0, Math.min(magnitudeForce, tensionMax));
-        
-        if (magnitudeForceClampee <= 0) {
-             return { force: new THREE.Vector3(), couple: new THREE.Vector3(), tension: 0 };
+        // Appliquer la correction moyenne pour déplacer le centre de masse
+        if (nbCorrections > 0) {
+            correctionTotale.multiplyScalar(0.5); // Adoucir la correction
+            etat.position.add(correctionTotale);
+            
+            // Ajuster aussi la vitesse pour éviter les oscillations
+            etat.velocite.multiplyScalar(0.95);
         }
-        
-        // La force tire le cerf-volant vers la poignée (direction opposée à diff)
-        const force = direction.clone().multiplyScalar(-magnitudeForceClampee);
-        const brasDeLevier = pointLocal.clone().applyQuaternion(etat.orientation);
-        const couple = brasDeLevier.clone().cross(force);
 
-        return { force, couple, tension: magnitudeForceClampee };
+        // Calcul du couple dû à la différence de tension
+        // Si les tensions sont différentes, cela crée une rotation
+        const diffTension = this.derniereTensionDroite - this.derniereTensionGauche;
+        if (Math.abs(diffTension) > 0.01) {
+            // Vecteur entre les deux points d'attache (dans le référentiel monde)
+            const entrePoints = new THREE.Vector3().subVectors(pointDroit, pointGauche);
+            const axeRotation = entrePoints.normalize();
+            
+            // Couple proportionnel à la différence de tension
+            const coupleScalaire = diffTension * 0.1; // Facteur d'ajustement
+            const coupleAngulaire = axeRotation.multiplyScalar(coupleScalaire);
+            
+            // Appliquer directement à la vitesse angulaire
+            etat.velociteAngulaire.add(coupleAngulaire.multiplyScalar(0.01 / etat.inertie.x));
+        }
     }
 }
