@@ -33,9 +33,10 @@ export class SystemeLignes {
     }
 
     /**
-     * Applique une contrainte géométrique : les points d'attache doivent rester
-     * à une distance fixe des poignées. Les lignes créent aussi un couple qui fait
-     * pivoter le cerf-volant vers sa position d'équilibre face au vent.
+     * Applique une contrainte géométrique : corrige la position des points d'attache
+     * pour qu'ils respectent la distance maximale aux poignées.
+     * Le couple émerge naturellement du fait que les corrections sont appliquées
+     * aux points CTRL qui sont décalés du centre de masse.
      */
     public appliquerContraintes(
         etat: EtatPhysique,
@@ -66,61 +67,19 @@ export class SystemeLignes {
         this.derniereTensionGauche = 0;
         this.derniereTensionDroite = 0;
 
-        // --- CORRECTION DE POSITION ---
-        // Chaque ligne tendue tire son point d'attache vers la poignée
-        let correctionGauche = new THREE.Vector3();
-        let correctionDroite = new THREE.Vector3();
-
+        // Correction géométrique pure : si un point dépasse, on le ramène
         if (distGauche > longueurGauche) {
-            const tension = distGauche - longueurGauche;
-            this.derniereTensionGauche = tension;
-            correctionGauche = versPoigneeGauche.normalize().multiplyScalar(tension);
+            this.derniereTensionGauche = distGauche - longueurGauche;
+            const correction = versPoigneeGauche.normalize().multiplyScalar(this.derniereTensionGauche * 0.5);
+            etat.position.add(correction);
+            etat.velocite.multiplyScalar(0.95);
         }
 
         if (distDroite > longueurDroite) {
-            const tension = distDroite - longueurDroite;
-            this.derniereTensionDroite = tension;
-            correctionDroite = versPoigneeDroite.normalize().multiplyScalar(tension);
-        }
-
-        // Correction moyenne appliquée au centre de masse
-        const correctionTotale = new THREE.Vector3().addVectors(correctionGauche, correctionDroite);
-        if (correctionTotale.lengthSq() > 0.001) {
-            correctionTotale.multiplyScalar(0.3); // Facteur adoucissant
-            etat.position.add(correctionTotale);
-            
-            // Amortissement de la vitesse pour stabiliser
-            etat.velocite.multiplyScalar(0.98);
-        }
-
-        // --- COUPLE DE RAPPEL ---
-        // Les lignes créent un couple qui fait pivoter le cerf-volant
-        // Chaque ligne tire sur son point d'attache, créant une force locale
-        const brasGauche = pointCtrlGaucheLocal.clone().applyQuaternion(etat.orientation);
-        const brasDroit = pointCtrlDroitLocal.clone().applyQuaternion(etat.orientation);
-
-        // Couple créé par chaque ligne tendue
-        let coupleTotalLignes = new THREE.Vector3();
-
-        if (this.derniereTensionGauche > 0.01) {
-            const forceGauche = versPoigneeGauche.normalize().multiplyScalar(this.derniereTensionGauche * 10);
-            const coupleGauche = brasGauche.clone().cross(forceGauche);
-            coupleTotalLignes.add(coupleGauche);
-        }
-
-        if (this.derniereTensionDroite > 0.01) {
-            const forceDroite = versPoigneeDroite.normalize().multiplyScalar(this.derniereTensionDroite * 10);
-            const coupleDroit = brasDroit.clone().cross(forceDroite);
-            coupleTotalLignes.add(coupleDroit);
-        }
-
-        // Appliquer le couple à la vitesse angulaire
-        if (coupleTotalLignes.lengthSq() > 0.001) {
-            const accelerationAngulaire = coupleTotalLignes.clone().divide(etat.inertie);
-            etat.velociteAngulaire.add(accelerationAngulaire.multiplyScalar(0.016)); // ~1 frame à 60fps
-            
-            // Amortissement angulaire
-            etat.velociteAngulaire.multiplyScalar(0.98);
+            this.derniereTensionDroite = distDroite - longueurDroite;
+            const correction = versPoigneeDroite.normalize().multiplyScalar(this.derniereTensionDroite * 0.5);
+            etat.position.add(correction);
+            etat.velocite.multiplyScalar(0.95);
         }
     }
 }
