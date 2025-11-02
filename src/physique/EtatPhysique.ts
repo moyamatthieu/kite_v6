@@ -3,6 +3,7 @@ import * as THREE from 'three';
 /**
  * Encapsule l'état physique d'un objet (position, vitesse, orientation).
  */
+// CONSIGNES: Pas de comportements scriptés. Les comportements doivent émerger de la physique de la simulation.
 export class EtatPhysique {
     public position: THREE.Vector3;
     public velocite: THREE.Vector3;

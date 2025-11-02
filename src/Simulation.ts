@@ -142,7 +142,6 @@ export class Simulation {
             ? "Bienvenue ! Simulation initialisée." 
             : "🔄 Simulation réinitialisée à une position stable.";
         this.interfaceUtilisateur.ajouterEntreeLog(message);
-        console.log("🔄 Simulation réinitialisée");
     }
 
     private basculerPause(): void {
@@ -325,39 +324,60 @@ export class Simulation {
         
         // Convertir l'orientation en angles d'Euler pour lisibilité
         const euler = new THREE.Euler().setFromQuaternion(etat.orientation, 'XYZ');
-        const pitch = (euler.x * 180 / Math.PI).toFixed(1);
-        const yaw = (euler.y * 180 / Math.PI).toFixed(1);
-        const roll = (euler.z * 180 / Math.PI).toFixed(1);
+        const pitch = (euler.x * 180 / Math.PI).toFixed(0);
+        const yaw = (euler.y * 180 / Math.PI).toFixed(0);
+        const roll = (euler.z * 180 / Math.PI).toFixed(0);
         
-        const formatVecteur = (v: THREE.Vector3) => `(${v.x.toFixed(1)}, ${v.y.toFixed(1)}, ${v.z.toFixed(1)})`;
-        const formatForce = (f: THREE.Vector3) => `${f.length().toFixed(1)}N ${formatVecteur(f)}`;
+        // Calcul de l'énergie cinétique
+        const energieCinetiqueTrans = 0.5 * etat.masse * etat.velocite.lengthSq();
+        const energieCinetiqueRot = 0.5 * (
+            etat.inertie.x * etat.velociteAngulaire.x ** 2 +
+            etat.inertie.y * etat.velociteAngulaire.y ** 2 +
+            etat.inertie.z * etat.velociteAngulaire.z ** 2
+        );
+        const energieTotale = energieCinetiqueTrans + energieCinetiqueRot;
         
-        // Calcul du détail des forces par panneau
-        const forcesParPanneau = this.moteurPhysique.dernieresForcesAeroDetaillees.map((f, i) => {
-            return `      P${i+1}: Lift=${f.forceLift.length().toFixed(1)}N, Drag=${f.forceDrag.length().toFixed(1)}N`;
-        }).join('\n');
+        // Calcul du ratio des forces
+        const forceAero = this.moteurPhysique.derniereForceAero.length();
+        const forceLignes = this.moteurPhysique.derniereForceLignes.length();
+        const forceGravite = this.moteurPhysique.derniereForceGravite.length();
+        const forceTotale = this.moteurPhysique.derniereForceTotale.length();
         
-        const rapport = `
-    Rapport à T+${this.horloge.elapsedTime.toFixed(1)}s
-    ---------------------------------
-    Cerf-volant:
-      - Position:  ${formatVecteur(etat.position)}
-      - Vitesse:   ${etat.velocite.length().toFixed(2)} m/s
-      - Vitesse Ang: ${etat.velociteAngulaire.length().toFixed(2)} rad/s
-      - Orientation: Pitch=${pitch}°, Yaw=${yaw}°, Roll=${roll}°
-    Vent:
-      - Apparent:  ${ventApparent.length().toFixed(1)} m/s ${formatVecteur(ventApparent)}
-    Forces:
-      - Gravité:   ${formatForce(this.moteurPhysique.derniereForceGravite)}
-      - Aéro:      ${formatForce(this.moteurPhysique.derniereForceAero)}
-${forcesParPanneau}
-      - Lignes:    ${formatForce(this.moteurPhysique.derniereForceLignes)}
-      - TOTALE:    ${formatForce(this.moteurPhysique.derniereForceTotale)}
-    Lignes:
-      - Tension G: ${lignes.derniereTensionGauche.toFixed(1)}N
-      - Tension D: ${lignes.derniereTensionDroite.toFixed(1)}N
-      - Delta L:   ${this.controleurUtilisateur.getDeltaLongueur().toFixed(2)}m
-    `;
-        return rapport.trim();
+        // Calcul des composantes de vitesse
+        const vx = etat.velocite.x.toFixed(1);
+        const vy = etat.velocite.y.toFixed(1);
+        const vz = etat.velocite.z.toFixed(1);
+        const vTotal = etat.velocite.length().toFixed(1);
+        const vAng = etat.velociteAngulaire.length();
+        
+        // Angle d'attaque moyen estimé
+        const dirVent = ventApparent.clone().normalize();
+        const normaleMoyenne = new THREE.Vector3(0, 0, 1).applyQuaternion(etat.orientation);
+        const angleAttaque = Math.acos(Math.abs(dirVent.dot(normaleMoyenne))) * 180 / Math.PI;
+        
+        // Détails des forces par panneau (condensé)
+        const forcesDetaillees = this.moteurPhysique.dernieresForcesAeroDetaillees;
+        const forcesParPanneau = forcesDetaillees.map((f, i) => 
+            `P${i+1}:L${f.forceLift.length().toFixed(1)} D${f.forceDrag.length().toFixed(1)}`
+        ).join(' | ');
+        
+        // Indicateurs d'état
+        const indicateurs = [];
+        if (vAng > 5) indicateurs.push('⚠️SPIN');
+        if (etat.position.y < 1) indicateurs.push('⚠️SOL');
+        if (forceLignes > 50) indicateurs.push('⚠️TENSION');
+        if (vTotal > 30) indicateurs.push('⚠️VITESSE');
+        const etatStr = indicateurs.length > 0 ? ` [${indicateurs.join(' ')}]` : '';
+        
+        // Rapport condensé avec informations clés
+        const rapport = `T=${this.horloge.elapsedTime.toFixed(1)}s${etatStr} | Pos(${etat.position.x.toFixed(1)},${etat.position.y.toFixed(1)},${etat.position.z.toFixed(1)}) | V=${vTotal}m/s(${vx},${vy},${vz}) | ω=${vAng.toFixed(2)}rad/s
+Rot: P=${pitch}° Y=${yaw}° R=${roll}° | AoA≈${angleAttaque.toFixed(0)}° | Vent=${ventApparent.length().toFixed(1)}m/s(${ventApparent.x.toFixed(1)},${ventApparent.y.toFixed(1)},${ventApparent.z.toFixed(1)})
+Forces: Aéro=${forceAero.toFixed(1)}N | Lignes=${forceLignes.toFixed(1)}N(G:${lignes.derniereTensionGauche.toFixed(1)} D:${lignes.derniereTensionDroite.toFixed(1)}) | Grav=${forceGravite.toFixed(1)}N | Tot=${forceTotale.toFixed(1)}N
+Énergie: Ec=${energieTotale.toFixed(2)}J (Trans:${energieCinetiqueTrans.toFixed(2)} Rot:${energieCinetiqueRot.toFixed(2)}) | ΔL=${this.controleurUtilisateur.getDeltaLongueur().toFixed(2)}m
+Aéro: ${forcesParPanneau}`;
+        
+        return rapport;
     }
 }
+
+// CONSIGNES: Pas de comportements scriptés. Les comportements doivent émerger de la physique de la simulation.

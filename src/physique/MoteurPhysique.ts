@@ -118,32 +118,22 @@ export class MoteurPhysique {
         const accelerationAngulaire = coupleTotal.clone().divide(etat.inertie);
         etat.velociteAngulaire.add(accelerationAngulaire.multiplyScalar(deltaTime));
 
-        // Garde-fou contre les valeurs NaN ou infinies
+        // Garde-fou contre les valeurs NaN ou infinies (erreur numérique uniquement)
         if (!isFinite(etat.velocite.x) || !isFinite(etat.velocite.y) || !isFinite(etat.velocite.z)) {
-            console.warn('⚠️ Vitesse invalide détectée, réinitialisation');
+            console.error('❌ Erreur numérique: Vitesse invalide détectée');
             etat.velocite.set(0, 0, 0);
         }
         if (!isFinite(etat.velociteAngulaire.x) || !isFinite(etat.velociteAngulaire.y) || !isFinite(etat.velociteAngulaire.z)) {
-            console.warn('⚠️ Vitesse angulaire invalide détectée, réinitialisation');
+            console.error('❌ Erreur numérique: Vitesse angulaire invalide détectée');
             etat.velociteAngulaire.set(0, 0, 0);
-        }
-        
-        // Limiter les vitesses extrêmes
-        const vitesseMax = 50; // m/s
-        if (etat.velocite.lengthSq() > vitesseMax * vitesseMax) {
-            etat.velocite.normalize().multiplyScalar(vitesseMax);
-        }
-        const vitesseAngMax = 10; // rad/s
-        if (etat.velociteAngulaire.lengthSq() > vitesseAngMax * vitesseAngMax) {
-            etat.velociteAngulaire.normalize().multiplyScalar(vitesseAngMax);
         }
 
         // 5. Mise à jour de la position et de l'orientation
         etat.position.add(etat.velocite.clone().multiplyScalar(deltaTime));
         
-        // Vérifier que la position reste valide
+        // Garde-fou contre les erreurs numériques catastrophiques uniquement
         if (!isFinite(etat.position.x) || !isFinite(etat.position.y) || !isFinite(etat.position.z)) {
-            console.error('❌ Position invalide détectée, réinitialisation nécessaire');
+            console.error('❌ Erreur numérique catastrophique: Position invalide détectée');
             etat.position.set(10, 5, 0);
             etat.velocite.set(0, 0, 0);
             etat.velociteAngulaire.set(0, 0, 0);
@@ -151,8 +141,7 @@ export class MoteurPhysique {
         
         if (etat.velociteAngulaire.lengthSq() > 0) {
             const angle = etat.velociteAngulaire.length() * deltaTime;
-            // Limiter l'angle de rotation pour éviter les instabilités
-            if (angle < Math.PI && isFinite(angle)) {
+            if (isFinite(angle)) {
                 const deltaRotation = new THREE.Quaternion().setFromAxisAngle(
                     etat.velociteAngulaire.clone().normalize(),
                     angle
@@ -165,3 +154,5 @@ export class MoteurPhysique {
         this.solveurContraintes.appliquerContraintes(etat, geometrie);
     }
 }
+
+// CONSIGNES: Pas de comportements scriptés. Les comportements doivent émerger de la physique de la simulation.

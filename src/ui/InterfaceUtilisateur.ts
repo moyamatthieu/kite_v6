@@ -125,19 +125,74 @@ export class InterfaceUtilisateur {
 
         const etat = moteur.etatCerfVolant;
         const vent = moteur.vent.parametres;
+        const ventApparent = moteur.vent.getVentApparent(etat.velocite);
         
         // Convertir le quaternion en angles d'Euler pour un affichage lisible
         const euler = new THREE.Euler().setFromQuaternion(etat.orientation, 'XYZ');
-        const pitch = (euler.x * 180 / Math.PI).toFixed(1);
-        const yaw = (euler.y * 180 / Math.PI).toFixed(1);
-        const roll = (euler.z * 180 / Math.PI).toFixed(1);
+        const pitch = (euler.x * 180 / Math.PI).toFixed(0);
+        const yaw = (euler.y * 180 / Math.PI).toFixed(0);
+        const roll = (euler.z * 180 / Math.PI).toFixed(0);
+
+        // Calcul de l'énergie totale
+        const energieCinetiqueTrans = 0.5 * etat.masse * etat.velocite.lengthSq();
+        const energieCinetiqueRot = 0.5 * (
+            etat.inertie.x * etat.velociteAngulaire.x ** 2 +
+            etat.inertie.y * etat.velociteAngulaire.y ** 2 +
+            etat.inertie.z * etat.velociteAngulaire.z ** 2
+        );
+        
+        // Statistiques des forces
+        const forceAero = moteur.derniereForceAero.length();
+        const forceLignes = moteur.derniereForceLignes.length();
+        const forceTotale = moteur.derniereForceTotale.length();
 
         divInfos.innerHTML = `
-            <strong>Position:</strong> ${etat.position.x.toFixed(1)}, ${etat.position.y.toFixed(1)}, ${etat.position.z.toFixed(1)}<br>
-            <strong>Vitesse:</strong> ${etat.velocite.length().toFixed(2)} m/s<br>
-            <strong>Orientation:</strong> P:${pitch}° Y:${yaw}° R:${roll}°<br>
-            <strong>Vent:</strong> ${vent.vitesse.toFixed(1)} km/h<br>
-            <strong>Lignes:</strong> ${moteur.systemeLignes.longueurLignes} m
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div>
+                    <strong style="color: #4fc3f7;">📍 Position</strong><br>
+                    X: ${etat.position.x.toFixed(1)}m<br>
+                    Y: ${etat.position.y.toFixed(1)}m<br>
+                    Z: ${etat.position.z.toFixed(1)}m
+                </div>
+                <div>
+                    <strong style="color: #4fc3f7;">🎯 Orientation</strong><br>
+                    Pitch: ${pitch}°<br>
+                    Yaw: ${yaw}°<br>
+                    Roll: ${roll}°
+                </div>
+                <div>
+                    <strong style="color: #4fc3f7;">⚡ Vitesse</strong><br>
+                    Linéaire: ${etat.velocite.length().toFixed(2)} m/s<br>
+                    Angulaire: ${etat.velociteAngulaire.length().toFixed(2)} rad/s<br>
+                    Vx/Vy/Vz: ${etat.velocite.x.toFixed(1)}/${etat.velocite.y.toFixed(1)}/${etat.velocite.z.toFixed(1)}
+                </div>
+                <div>
+                    <strong style="color: #4fc3f7;">💨 Vent</strong><br>
+                    Global: ${vent.vitesse.toFixed(0)} km/h<br>
+                    Apparent: ${ventApparent.length().toFixed(1)} m/s<br>
+                    Direction: ${ventApparent.x.toFixed(1)}/${ventApparent.y.toFixed(1)}/${ventApparent.z.toFixed(1)}
+                </div>
+                <div>
+                    <strong style="color: #4fc3f7;">⚖️ Forces</strong><br>
+                    Aéro: ${forceAero.toFixed(1)} N<br>
+                    Lignes: ${forceLignes.toFixed(1)} N<br>
+                    Totale: ${forceTotale.toFixed(1)} N
+                </div>
+                <div>
+                    <strong style="color: #4fc3f7;">🔋 Énergie</strong><br>
+                    Trans: ${energieCinetiqueTrans.toFixed(2)} J<br>
+                    Rot: ${energieCinetiqueRot.toFixed(2)} J<br>
+                    Total: ${(energieCinetiqueTrans + energieCinetiqueRot).toFixed(2)} J
+                </div>
+            </div>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2);">
+                <strong style="color: #4fc3f7;">📏 Lignes</strong><br>
+                Longueur: ${moteur.systemeLignes.longueurLignes}m | 
+                Tension G: ${moteur.systemeLignes.derniereTensionGauche.toFixed(1)}N | 
+                Tension D: ${moteur.systemeLignes.derniereTensionDroite.toFixed(1)}N
+            </div>
         `;
     }
 }
+
+// CONSIGNES: Pas de comportements scriptés. Les comportements doivent émerger de la physique de la simulation.

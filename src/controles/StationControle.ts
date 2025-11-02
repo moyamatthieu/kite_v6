@@ -10,6 +10,8 @@ import * as THREE from 'three';
  *   partent vers le cerf-volant qui vole dans le vent
  * - Le treuil GAUCHE est situé en Z- (côté négatif de l'axe Z global)
  * - Le treuil DROIT est situé en Z+ (côté positif de l'axe Z global)
+ * 
+ * CONSIGNES: Pas de comportements scriptés. Les comportements doivent émerger de la physique de la simulation.
  */
 export class StationControle {
     public objet3D: THREE.Group;

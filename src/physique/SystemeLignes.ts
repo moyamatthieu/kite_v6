@@ -88,7 +88,6 @@ export class SystemeLignes {
         const tangential_velocity = etat.velociteAngulaire.clone().cross(r_world);
         const velocitePoint = etat.velocite.clone().add(tangential_velocity);
 
-
         const diff = new THREE.Vector3().subVectors(pointMonde, poignee);
         const distance = diff.length();
         
@@ -99,11 +98,12 @@ export class SystemeLignes {
         const direction = diff.normalize();
         
         const elongation = distance - longueurLigne;
-        const forceRappel = this.raideur * elongation;
         
+        // Modèle ressort-amortisseur simple et stable
+        const forceRappel = this.raideur * elongation;
         const velociteRelative = velocitePoint.dot(direction);
         const forceAmortissement = this.amortissement * velociteRelative;
-
+        
         const magnitudeForce = forceRappel + forceAmortissement;
 
         if (magnitudeForce <= 0) {
@@ -117,3 +117,5 @@ export class SystemeLignes {
         return { force, couple, tension: magnitudeForce };
     }
 }
+
+// CONSIGNES: Pas de comportements scriptés. Les comportements doivent émerger de la physique de la simulation.

@@ -389,3 +389,5 @@ export class CerfVolant {
         }
     }
 }
+
+// CONSIGNES: Pas de comportements scriptés. Les comportements doivent émerger de la physique de la simulation.

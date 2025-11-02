@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+// CONSIGNES: Pas de comportements scriptés. Les comportements doivent émerger de la physique de la simulation.
+
 export interface ParametresBrides {
     nez: number;
     inter: number;
@@ -181,10 +183,6 @@ export class GeometrieCerfVolant {
         const distInter = inter.distanceTo(ctrl);
         const distCentre = centre.distanceTo(ctrl);
 
-        console.log('=== Vérification des brides ===');
-        console.log(`NEZ→CTRL: demandé=${parametres.nez.toFixed(3)}m, calculé=${distNez.toFixed(3)}m, erreur=${Math.abs(distNez - parametres.nez).toFixed(4)}m`);
-        console.log(`INTER→CTRL: demandé=${parametres.inter.toFixed(3)}m, calculé=${distInter.toFixed(3)}m, erreur=${Math.abs(distInter - parametres.inter).toFixed(4)}m`);
-        console.log(`CENTRE→CTRL: demandé=${parametres.centre.toFixed(3)}m, calculé=${distCentre.toFixed(3)}m, erreur=${Math.abs(distCentre - parametres.centre).toFixed(4)}m`);
-        console.log(`Position CTRL: x=${ctrl.x.toFixed(3)}, y=${ctrl.y.toFixed(3)}, z=${ctrl.z.toFixed(3)}`);
+        // Vérification silencieuse - logs disponibles dans le journal de simulation
     }
 }

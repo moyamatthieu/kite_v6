@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+// CONSIGNES: Pas de comportements scriptés. Les comportements doivent émerger de la physique de la simulation.
+
 export interface ParametresVent {
     vitesse: number; // en km/h
     turbulence: number; // en %

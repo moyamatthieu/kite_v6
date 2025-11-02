@@ -70,11 +70,6 @@ export class CalculateurAerodynamique {
             const sinAlpha = Math.abs(cosTheta);
             const alpha = Math.asin(sinAlpha);
 
-            // Debug temporaire pour comprendre les normales
-            if (index < 4) {
-                console.log(`P${index+1}: normale=(${normaleMonde.x.toFixed(2)}, ${normaleMonde.y.toFixed(2)}, ${normaleMonde.z.toFixed(2)}), cosTheta=${cosTheta.toFixed(2)}, alpha=${(alpha*180/Math.PI).toFixed(0)}°`);
-            }
-
             // CORRECTION: On génère de la portance dès qu'il y a un angle d'incidence,
             // peu importe le côté de la surface que le vent frappe.
             // La direction de la normale détermine seulement le sens de la portance.
@@ -139,3 +134,5 @@ export class CalculateurAerodynamique {
         return forcesDetaillees;
     }
 }
+
+// CONSIGNES: Pas de comportements scriptés. Les comportements doivent émerger de la physique de la simulation.

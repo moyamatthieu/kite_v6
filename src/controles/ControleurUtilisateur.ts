@@ -1,5 +1,6 @@
 /**
  * Gère les entrées clavier de l'utilisateur pour contrôler les treuils de la station.
+ * CONSIGNES: Pas de comportements scriptés. Les comportements doivent émerger de la physique de la simulation.
  */
 export class ControleurUtilisateur {
     private deltaLongueur = 0;
