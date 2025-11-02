@@ -33,10 +33,9 @@ export class SystemeLignes {
     }
 
     /**
-     * Applique une contrainte géométrique : corrige la position des points d'attache
-     * pour qu'ils respectent la distance maximale aux poignées.
-     * Le couple émerge naturellement du fait que les corrections sont appliquées
-     * aux points CTRL qui sont décalés du centre de masse.
+     * Applique une contrainte géométrique stricte : les points CTRL doivent rester
+     * exactement à la distance des poignées (comme un pendule rigide).
+     * Le cerf-volant pivote naturellement autour de ce point d'attache.
      */
     public appliquerContraintes(
         etat: EtatPhysique,
@@ -56,30 +55,41 @@ export class SystemeLignes {
         const pointGauche = pointCtrlGaucheLocal.clone().applyQuaternion(etat.orientation).add(etat.position);
         const pointDroit = pointCtrlDroitLocal.clone().applyQuaternion(etat.orientation).add(etat.position);
 
-        // Vecteurs vers les poignées
-        const versPoigneeGauche = new THREE.Vector3().subVectors(positionsPoignees.gauche, pointGauche);
-        const versPoigneeDroite = new THREE.Vector3().subVectors(positionsPoignees.droite, pointDroit);
+        // Vecteurs depuis les poignées vers les points d'attache
+        const versPointGauche = new THREE.Vector3().subVectors(pointGauche, positionsPoignees.gauche);
+        const versPointDroit = new THREE.Vector3().subVectors(pointDroit, positionsPoignees.droite);
 
-        const distGauche = versPoigneeGauche.length();
-        const distDroite = versPoigneeDroite.length();
+        const distGauche = versPointGauche.length();
+        const distDroite = versPointDroit.length();
 
         // Réinitialiser les tensions pour le logging
         this.derniereTensionGauche = 0;
         this.derniereTensionDroite = 0;
 
-        // Correction géométrique pure : si un point dépasse, on le ramène
-        if (distGauche > longueurGauche) {
-            this.derniereTensionGauche = distGauche - longueurGauche;
-            const correction = versPoigneeGauche.normalize().multiplyScalar(this.derniereTensionGauche * 0.5);
-            etat.position.add(correction);
-            etat.velocite.multiplyScalar(0.95);
-        }
+        // Point milieu entre les deux points de contrôle (centre de suspension)
+        const milieu = new THREE.Vector3().addVectors(pointGauche, pointDroit).multiplyScalar(0.5);
+        const milieuPoignees = new THREE.Vector3().addVectors(positionsPoignees.gauche, positionsPoignees.droite).multiplyScalar(0.5);
 
-        if (distDroite > longueurDroite) {
-            this.derniereTensionDroite = distDroite - longueurDroite;
-            const correction = versPoigneeDroite.normalize().multiplyScalar(this.derniereTensionDroite * 0.5);
+        // Contrainte de pendule : le centre de suspension doit être à la bonne distance
+        const versMilieu = new THREE.Vector3().subVectors(milieu, milieuPoignees);
+        const distMilieu = versMilieu.length();
+        const longueurMoyenne = (longueurGauche + longueurDroite) / 2;
+
+        // Si le cerf-volant s'éloigne trop, on le ramène comme un pendule
+        if (distMilieu > longueurMoyenne) {
+            this.derniereTensionGauche = distMilieu - longueurMoyenne;
+            this.derniereTensionDroite = distMilieu - longueurMoyenne;
+            
+            // Correction de position vers le point d'attache
+            const correction = versMilieu.normalize().multiplyScalar(-(distMilieu - longueurMoyenne) * 0.8);
             etat.position.add(correction);
-            etat.velocite.multiplyScalar(0.95);
+            
+            // La composante de vitesse qui éloigne du point d'attache est annulée (pendule inextensible)
+            const directionRadiale = versMilieu.normalize();
+            const vitesseRadiale = etat.velocite.dot(directionRadiale);
+            if (vitesseRadiale > 0) {
+                etat.velocite.addScaledVector(directionRadiale, -vitesseRadiale * 0.8);
+            }
         }
     }
 }

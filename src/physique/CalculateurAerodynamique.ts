@@ -51,8 +51,16 @@ export class CalculateurAerodynamique {
 
             const cosTheta = normaleMonde.dot(directionVent);
 
+            // Le signe de cosTheta nous indique de quel côté le vent frappe.
+            // Si cosTheta < 0, le vent frappe la face avant (celle d'où sort la normale). C'est la situation normale de vol.
+            // Si cosTheta > 0, le vent frappe la face arrière. La force doit "pousser" la toile pour la retourner.
+
+            // L'angle d'incidence (alpha) est l'angle entre le plan de la surface et le vent.
+            // sin(alpha) = |normale · directionVent| = |cosTheta|
+            const sinAlpha = Math.abs(cosTheta);
+
             // Si le vent est presque parallèle à la surface, la force est négligeable.
-            if (Math.abs(cosTheta) < 0.01) {
+            if (sinAlpha < 0.01) {
                 forcesDetaillees.push({
                     force: new THREE.Vector3(),
                     forceLift: new THREE.Vector3(),
@@ -63,51 +71,51 @@ export class CalculateurAerodynamique {
                     pointApplicationLocal: centrePanneau.clone(),
                     nomPanneau: `Panneau ${index + 1}`
                 });
-                return; // Equivalent de 'continue' dans un forEach
+                return; // Pas de force aéro
             }
-
-            let Cl, Cd;
-            const sinAlpha = Math.abs(cosTheta);
+            
             const alpha = Math.asin(sinAlpha);
 
-            // Modèle aérodynamique : la portance dépend de l'angle d'incidence
-            // peu importe le côté de la surface que le vent frappe.
-            const alpha_stall = 25 * Math.PI / 180; // Angle de décrochage à 25°
+            let Cl, Cd;
+            
+            // Modèle aérodynamique amélioré
+            const alpha_stall = 20 * Math.PI / 180; // Angle de décrochage plus réaliste (20°)
             
             if (alpha < alpha_stall) {
-                // Pré-décrochage : portance dominante, traînée faible
-                Cl = 5.0 * Math.sin(alpha) * Math.cos(alpha); // Cl max ≈ 2.5 à α ≈ 45°
-                Cd = 0.05 + 0.3 * sinAlpha * sinAlpha;
+                // Pré-décrochage : approximation linéaire Cl ≈ 2 * PI * alpha
+                Cl = 2 * Math.PI * alpha;
+                // Formule de traînée = traînée parasite + traînée induite
+                const AR = 5; // Aspect Ratio (envergure^2 / surface), estimation pour un cerf-volant
+                const e = 0.75; // Oswald efficiency factor
+                Cd = 0.04 + (Cl * Cl) / (Math.PI * AR * e);
             } else {
-                // Post-décrochage : portance effondrée, traînée élevée
-                Cl = 0.5 * Math.cos(alpha);
-                Cd = 1.2 * sinAlpha;
+                // Post-décrochage : portance effondrée, traînée de forme dominante
+                Cl = 0.6 * Math.cos(alpha); // Chute de portance
+                Cd = 1.5 * sinAlpha; // Forte traînée
             }
-            
-            // Note : Cl est toujours positif. La direction du lift est gérée automatiquement
-            // par le produit vectoriel qui suit, en fonction de l'orientation de la normale.
 
-            // La force de traînée est toujours dans la direction du vent apparent.
+            // La force de traînée (Drag) est toujours dans la direction du vent apparent.
             const forceDrag = directionVent.clone().multiplyScalar(Cd * pressionDynamique * surface);
 
-            // La force de portance est perpendiculaire au vent ET dans le plan (normale, vent)
-            // Calcul par double produit vectoriel :
-            // 1. liftAxis = normale × vent : axe perpendiculaire au plan
-            // 2. liftDirection = vent × liftAxis : direction perpendiculaire au vent, dans le plan
-            const liftAxis = new THREE.Vector3().crossVectors(normaleMonde, directionVent);
-            const liftDirection = new THREE.Vector3().crossVectors(directionVent, liftAxis);
-
-            if (liftDirection.lengthSq() > 0.0001) {
-                liftDirection.normalize();
-            } else {
-                liftDirection.set(0, 0, 0); // Pas de portance si vent et normale sont colinéaires
+            // La force de portance (Lift) est perpendiculaire au vent et "pousse" la surface.
+            // Sa direction est cruciale pour l'auto-stabilisation.
+            
+            // On calcule un vecteur "haut" relatif à la surface et au vent.
+            // Ce vecteur est perpendiculaire au vent et se trouve dans le plan (vent, normale).
+            // Le signe de cosTheta oriente correctement la force pour qu'elle pousse toujours la toile.
+            const liftDirection = new THREE.Vector3().subVectors(normaleMonde, directionVent.clone().multiplyScalar(cosTheta)).normalize();
+            
+            // Si le vent est parfaitement aligné avec la normale, le calcul ci-dessus donne un vecteur nul.
+            if (liftDirection.lengthSq() < 0.0001) {
+                // Dans ce cas, la portance est nulle. Seule la traînée (pression) s'applique.
+                liftDirection.set(0,0,0);
             }
 
-            const forceLift = liftDirection.clone().multiplyScalar(Cl * pressionDynamique * surface);
+            const forceLift = liftDirection.multiplyScalar(Cl * pressionDynamique * surface);
             
             const forceTotalePanneau = new THREE.Vector3().add(forceLift).add(forceDrag);
 
-            // Calcul de la composante normale de la force aéro totale
+            // Calcul de la composante normale de la force aéro totale (utile pour le debug ou solveur de contraintes)
             const forceNormale = normaleMonde.clone().multiplyScalar(forceTotalePanneau.dot(normaleMonde));
 
             forcesDetaillees.push({
