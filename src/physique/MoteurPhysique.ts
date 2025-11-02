@@ -110,12 +110,17 @@ export class MoteurPhysique {
         this.derniereForceLignes.copy(forceLignes);
         this.derniereForceTotale.copy(forceTotale);
 
-        // 4. Intégration du mouvement (simple Euler)
+        // 4. Intégration du mouvement avec amortissement numérique pour stabilité
         const acceleration = forceTotale.clone().divideScalar(etat.masse);
+        
+        // Amortissement de stabilisation (simule la résistance de l'air non modélisée)
+        const facteurAmortissement = 0.98; // 2% de perte par frame (~20% par seconde)
+        etat.velocite.multiplyScalar(facteurAmortissement);
         etat.velocite.add(acceleration.multiplyScalar(deltaTime));
         
         // Utilisation de l'inertie pour un calcul physiquement correct de l'accélération angulaire
         const accelerationAngulaire = coupleTotal.clone().divide(etat.inertie);
+        etat.velociteAngulaire.multiplyScalar(facteurAmortissement); // Amortissement angulaire aussi
         etat.velociteAngulaire.add(accelerationAngulaire.multiplyScalar(deltaTime));
 
         // Garde-fou contre les valeurs NaN ou infinies
@@ -128,12 +133,12 @@ export class MoteurPhysique {
             etat.velociteAngulaire.set(0, 0, 0);
         }
         
-        // Limiter les vitesses extrêmes
-        const vitesseMax = 50; // m/s
+        // Limiter les vitesses extrêmes pour la stabilité numérique
+        const vitesseMax = 30; // m/s (108 km/h) - réduit pour plus de stabilité
         if (etat.velocite.lengthSq() > vitesseMax * vitesseMax) {
             etat.velocite.normalize().multiplyScalar(vitesseMax);
         }
-        const vitesseAngMax = 10; // rad/s
+        const vitesseAngMax = 8; // rad/s - réduit pour éviter les rotations folles
         if (etat.velociteAngulaire.lengthSq() > vitesseAngMax * vitesseAngMax) {
             etat.velociteAngulaire.normalize().multiplyScalar(vitesseAngMax);
         }

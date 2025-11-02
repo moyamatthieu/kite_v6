@@ -8,8 +8,10 @@ import { GeometrieCerfVolant } from '../cerfvolant/GeometrieCerfVolant';
 export class SystemeLignes {
     private _longueurBaseLignes: number;
     private deltaLongueur = 0; // Différence de longueur entre les lignes
-    public raideur = 100; // N/m (constante de rappel du ressort)
-    public amortissement = 5; // Ns/m (facteur d'amortissement)
+    
+    // Paramètres physiques pour des lignes avec comportement réaliste
+    public raideur = 5000; // N/m - rigide mais pas trop pour éviter les chocs
+    public amortissement = 100; // Ns/m - amortissement très élevé pour stabilité
 
     // Pour le logging et le debug
     public derniereTensionGauche = 0;
@@ -88,32 +90,40 @@ export class SystemeLignes {
         const tangential_velocity = etat.velociteAngulaire.clone().cross(r_world);
         const velocitePoint = etat.velocite.clone().add(tangential_velocity);
 
-
         const diff = new THREE.Vector3().subVectors(pointMonde, poignee);
         const distance = diff.length();
         
+        // Ligne détendue : pas de force
         if (distance <= longueurLigne) {
             return { force: new THREE.Vector3(), couple: new THREE.Vector3(), tension: 0 };
         }
 
         const direction = diff.normalize();
         
+        // Calcul de la force élastique (rappel)
         const elongation = distance - longueurLigne;
         const forceRappel = this.raideur * elongation;
         
+        // Calcul de la force d'amortissement (projection de la vitesse sur la direction)
         const velociteRelative = velocitePoint.dot(direction);
         const forceAmortissement = this.amortissement * velociteRelative;
 
+        // Force totale = rappel + amortissement
         const magnitudeForce = forceRappel + forceAmortissement;
 
-        if (magnitudeForce <= 0) {
+        // Limite de tension maximale pour éviter des forces explosives
+        const tensionMax = 200; // N - réduit pour plus de douceur
+        const magnitudeForceClampee = Math.max(0, Math.min(magnitudeForce, tensionMax));
+        
+        if (magnitudeForceClampee <= 0) {
              return { force: new THREE.Vector3(), couple: new THREE.Vector3(), tension: 0 };
         }
         
-        const force = direction.clone().multiplyScalar(-magnitudeForce);
+        // La force tire le cerf-volant vers la poignée (direction opposée à diff)
+        const force = direction.clone().multiplyScalar(-magnitudeForceClampee);
         const brasDeLevier = pointLocal.clone().applyQuaternion(etat.orientation);
         const couple = brasDeLevier.clone().cross(force);
 
-        return { force, couple, tension: magnitudeForce };
+        return { force, couple, tension: magnitudeForceClampee };
     }
 }
