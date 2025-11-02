@@ -100,6 +100,23 @@ export class Simulation {
         this.interfaceUtilisateur.surChangementDebug((actif) => {
              this.cerfVolant.basculerDebug(actif);
         });
+        
+        // Connecter les contrôles de l'autopilote
+        this.interfaceUtilisateur.surToggleAutoPilote(() => {
+            const autoPilote = this.controleurUtilisateur.autoPilote;
+            if (autoPilote) {
+                const nouvelEtat = !autoPilote.estActif();
+                autoPilote.setActif(nouvelEtat);
+                this.interfaceUtilisateur.mettreAJourBoutonToggleAutoPilote(nouvelEtat);
+                console.log(`Autopilote: ${nouvelEtat ? 'ACTIVÉ' : 'DÉSACTIVÉ'}`);
+            }
+        });
+        
+        this.interfaceUtilisateur.surChangementModeAutoPilote((mode) => {
+            this.controleurUtilisateur.changerModeAutoPilote(mode, this.moteurPhysique.etatCerfVolant);
+            this.interfaceUtilisateur.mettreAJourBoutonsModes(mode);
+            console.log(`Mode autopilote: ${mode}`);
+        });
     }
     
     private reinitialiser(estInitialisation = false): void {

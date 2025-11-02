@@ -229,6 +229,51 @@
             pointer-events: none;
             transform: translate(10px, -10px);
         }
+
+        /* Styles pour les boutons de mode autopilote */
+        .autopilot-mode-btn {
+            padding: 8px 10px;
+            background: rgba(100, 100, 100, 0.3);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 500;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .autopilot-mode-btn:hover {
+            background: rgba(150, 150, 150, 0.4);
+            border-color: rgba(255, 255, 255, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .autopilot-mode-btn:active {
+            transform: translateY(0);
+        }
+
+        .autopilot-mode-btn.active {
+            background: rgba(0, 150, 255, 0.6);
+            border-color: rgba(0, 200, 255, 0.8);
+            box-shadow: 0 0 10px rgba(0, 150, 255, 0.4);
+        }
+
+        .autopilot-mode-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        #autopilot-toggle {
+            transition: all 0.3s;
+        }
+
+        #autopilot-toggle.active {
+            background: rgba(50, 255, 100, 0.4) !important;
+            border-color: rgba(50, 255, 100, 0.6);
+            box-shadow: 0 0 15px rgba(50, 255, 100, 0.3);
+        }
     </style>
 <link rel="stylesheet" href="/index.css">
 </head>
@@ -287,6 +332,46 @@
                     <span class="slider-value" id="bridle-centre-value">0.65m</span>
                 </div>
             </div>
+            
+            <!-- Panneau de contrôle de l'autopilote -->
+            <div class="control-group" style="margin-top: 20px; padding: 15px; background: rgba(0, 100, 255, 0.1); border-radius: 8px; border: 2px solid rgba(0, 150, 255, 0.3);">
+                <h4 style="margin: 0 0 12px 0; color: #4da6ff; font-size: 15px;">🤖 Autopilote</h4>
+                
+                <!-- Bouton d'activation -->
+                <button class="ui-button" id="autopilot-toggle" style="width: 100%; margin-bottom: 12px; font-weight: bold; background: rgba(50, 150, 255, 0.3);">
+                    ⚪ Autopilote: OFF
+                </button>
+                
+                <!-- Grille de boutons de modes -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                    <button class="autopilot-mode-btn" data-mode="manuel" style="grid-column: span 2;">
+                        1️⃣ Manuel
+                    </button>
+                    <button class="autopilot-mode-btn" data-mode="stabilisation">
+                        2️⃣ Stabilisation
+                    </button>
+                    <button class="autopilot-mode-btn" data-mode="maintien_altitude">
+                        3️⃣ Altitude
+                    </button>
+                    <button class="autopilot-mode-btn" data-mode="maintien_position">
+                        4️⃣ Position
+                    </button>
+                    <button class="autopilot-mode-btn" data-mode="zenith">
+                        5️⃣ ☀️ Zénith
+                    </button>
+                    <button class="autopilot-mode-btn" data-mode="trajectoire_circulaire">
+                        6️⃣ Circulaire
+                    </button>
+                    <button class="autopilot-mode-btn" data-mode="acrobatique">
+                        7️⃣ Acrobatique
+                    </button>
+                </div>
+                
+                <!-- Info du mode actuel -->
+                <div id="autopilot-current-mode" style="margin-top: 10px; padding: 8px; background: rgba(0, 0, 0, 0.3); border-radius: 4px; font-size: 11px; font-family: 'Courier New', monospace; text-align: center; color: #aaa;">
+                    Mode: Manuel
+                </div>
+            </div>
         </div>
 
         <!-- Panneau de debug -->
@@ -303,27 +388,15 @@
                 </div>
             </div>
             
-            <!-- Aide Autopilote -->
-            <div style="margin-top: 15px; padding: 10px; background: rgba(0, 100, 255, 0.2); border-radius: 5px; border: 1px solid rgba(0, 150, 255, 0.5);">
-                <div style="font-weight: bold; margin-bottom: 8px; color: #4da6ff;">🤖 Autopilote</div>
+            <!-- Aide Clavier -->
+            <div style="margin-top: 15px; padding: 10px; background: rgba(255, 100, 0, 0.2); border-radius: 5px; border: 1px solid rgba(255, 150, 0, 0.5);">
+                <div style="font-weight: bold; margin-bottom: 8px; color: #ff9944;">⌨️ Raccourcis Clavier</div>
                 <div style="font-size: 11px; line-height: 1.6; font-family: 'Courier New', monospace;">
-                    <strong>A</strong> : Activer/Désactiver<br>
-                    <strong>1</strong> : Manuel<br>
-                    <strong>2</strong> : Stabilisation<br>
-                    <strong>3</strong> : Maintien altitude<br>
-                    <strong>4</strong> : Maintien position<br>
-                    <strong>5</strong> : ☀️ Zénith (au-dessus)<br>
-                    <strong>6</strong> : Trajectoire circulaire<br>
-                    <strong>7</strong> : Mode acrobatique
-                </div>
-            </div>
-            
-            <!-- Aide pilotage manuel -->
-            <div style="margin-top: 10px; padding: 10px; background: rgba(255, 100, 0, 0.2); border-radius: 5px; border: 1px solid rgba(255, 150, 0, 0.5);">
-                <div style="font-weight: bold; margin-bottom: 8px; color: #ff9944;">🎮 Pilotage Manuel</div>
-                <div style="font-size: 11px; line-height: 1.6; font-family: 'Courier New', monospace;">
+                    <strong>A</strong> : Toggle Autopilote<br>
+                    <strong>1-7</strong> : Modes (si actif)<br>
                     <strong>Q / ←</strong> : Tirer à gauche<br>
-                    <strong>D / →</strong> : Tirer à droite
+                    <strong>D / →</strong> : Tirer à droite<br>
+                    <strong>Espace</strong> : Pause
                 </div>
             </div>
         </div>

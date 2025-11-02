@@ -2,11 +2,14 @@ import * as THREE from 'three';
 import { ParametresVent } from '../physique/Vent';
 import { MoteurPhysique } from '../physique/MoteurPhysique';
 import { CerfVolant } from '../cerfvolant/CerfVolant';
+import { ModeAutoPilote } from '../controles/AutoPilote';
 
 type CallbackVent = (params: Partial<ParametresVent>) => void;
 type CallbackLignes = (longueur: number) => void;
 type CallbackBrides = (type: 'nez' | 'inter' | 'centre', longueur: number) => void;
 type CallbackDebug = (actif: boolean) => void;
+type CallbackAutoPiloteToggle = () => void;
+type CallbackAutoPiloteMode = (mode: ModeAutoPilote) => void;
 
 /**
  * Gère les interactions avec les éléments de l'interface (DOM).
@@ -18,6 +21,8 @@ export class InterfaceUtilisateur {
     private onLignesChange: CallbackLignes = () => {};
     private onBridesChange: CallbackBrides = () => {};
     private onDebugChange: CallbackDebug = () => {};
+    private onAutoPiloteToggle: CallbackAutoPiloteToggle = () => {};
+    private onAutoPiloteMode: CallbackAutoPiloteMode = () => {};
     
     public debugActif = true;
 
@@ -94,6 +99,9 @@ export class InterfaceUtilisateur {
         this.lierSlider('bridle-nez', 'bridle-nez-value', 'm', (valeur) => this.onBridesChange('nez', valeur));
         this.lierSlider('bridle-inter', 'bridle-inter-value', 'm', (valeur) => this.onBridesChange('inter', valeur));
         this.lierSlider('bridle-centre', 'bridle-centre-value', 'm', (valeur) => this.onBridesChange('centre', valeur));
+        
+        // Initialiser les contrôles de l'autopilote
+        this.initialiserControlesAutoPilote();
     }
     
     private lierBouton(id: string, action: () => void): void {
@@ -167,6 +175,74 @@ export class InterfaceUtilisateur {
     public surChangementLignes(callback: CallbackLignes): void { this.onLignesChange = callback; }
     public surChangementBrides(callback: CallbackBrides): void { this.onBridesChange = callback; }
     public surChangementDebug(callback: CallbackDebug): void { this.onDebugChange = callback; }
+    public surToggleAutoPilote(callback: CallbackAutoPiloteToggle): void { this.onAutoPiloteToggle = callback; }
+    public surChangementModeAutoPilote(callback: CallbackAutoPiloteMode): void { this.onAutoPiloteMode = callback; }
+
+    /**
+     * Initialise les contrôles de l'autopilote (boutons de mode)
+     */
+    private initialiserControlesAutoPilote(): void {
+        // Bouton toggle autopilote
+        const boutonToggle = document.getElementById('autopilot-toggle');
+        boutonToggle?.addEventListener('click', () => {
+            this.onAutoPiloteToggle();
+        });
+        
+        // Boutons de sélection de mode
+        const boutonsModes = document.querySelectorAll('.autopilot-mode-btn');
+        boutonsModes.forEach(bouton => {
+            bouton.addEventListener('click', () => {
+                const mode = (bouton as HTMLElement).getAttribute('data-mode') as ModeAutoPilote;
+                if (mode) {
+                    this.onAutoPiloteMode(mode);
+                    this.mettreAJourBoutonsModes(mode);
+                }
+            });
+        });
+    }
+    
+    /**
+     * Met à jour l'affichage du bouton toggle de l'autopilote
+     */
+    public mettreAJourBoutonToggleAutoPilote(actif: boolean): void {
+        const bouton = document.getElementById('autopilot-toggle');
+        if (bouton) {
+            bouton.textContent = actif ? '🟢 Autopilote: ON' : '⚪ Autopilote: OFF';
+            bouton.classList.toggle('active', actif);
+        }
+        
+        // Activer/désactiver les boutons de mode
+        const boutonsModes = document.querySelectorAll('.autopilot-mode-btn');
+        boutonsModes.forEach(btn => {
+            (btn as HTMLButtonElement).disabled = !actif;
+        });
+    }
+    
+    /**
+     * Met à jour les boutons de mode pour indiquer le mode actif
+     */
+    public mettreAJourBoutonsModes(modeActif: string): void {
+        const boutonsModes = document.querySelectorAll('.autopilot-mode-btn');
+        boutonsModes.forEach(btn => {
+            const btnMode = (btn as HTMLElement).getAttribute('data-mode');
+            btn.classList.toggle('active', btnMode === modeActif);
+        });
+        
+        // Mettre à jour le texte d'information
+        const infoMode = document.getElementById('autopilot-current-mode');
+        if (infoMode) {
+            const nomsModes: { [key: string]: string } = {
+                'manuel': 'Manuel',
+                'stabilisation': 'Stabilisation',
+                'maintien_altitude': 'Maintien Altitude',
+                'maintien_position': 'Maintien Position',
+                'zenith': '☀️ Zénith',
+                'trajectoire_circulaire': 'Trajectoire Circulaire',
+                'acrobatique': 'Acrobatique'
+            };
+            infoMode.textContent = `Mode: ${nomsModes[modeActif] || modeActif}`;
+        }
+    }
 
     public mettreAJourBoutonPause(estEnPause: boolean): void {
         const bouton = document.getElementById('play-pause');
