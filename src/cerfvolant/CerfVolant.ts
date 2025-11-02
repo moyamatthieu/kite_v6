@@ -32,7 +32,7 @@ export class CerfVolant {
     private a_forcesSurfacesVentApparent: THREE.ArrowHelper[] = [];
     private a_forcesSurfacesAeroTotale: THREE.ArrowHelper[] = [];
     
-    private forceScale = 0.5; // Échelle visuelle : 1N = 0.5m (augmentée pour meilleure visibilité)
+    private forceScale = 0.5; // Échelle visuelle pour les vecteurs de force : 1N = 0.5m
 
     constructor(geometrie: GeometrieCerfVolant) {
         this.objet3D = new THREE.Group();
@@ -339,9 +339,9 @@ export class CerfVolant {
             
             if (!dragArrow || !liftArrow || !normaleArrow || !ventApparentArrow || !aeroTotaleArrow) return;
             
-            // Fonction pour mettre à jour une flèche de force (taille proportionnelle)
+            // Fonction pour mettre à jour une flèche de force (taille proportionnelle à la magnitude)
             const updateForceArrow = (arrow: THREE.ArrowHelper, force: THREE.Vector3) => {
-                // Seuil réduit pour afficher même les petites forces (0.0001 N² = 0.01 N)
+                // Seuil minimal pour afficher les petites forces (0.0001 N² ≈ 0.01 N)
                 if (force.lengthSq() < 0.0001) {
                     arrow.visible = false;
                     return;
@@ -350,7 +350,7 @@ export class CerfVolant {
                 arrow.position.copy(forceDetaillee.pointApplicationLocal);
                 const localDirection = force.clone().applyQuaternion(inverseQuaternion).normalize();
                 arrow.setDirection(localDirection);
-                // Longueur minimale de 0.1m pour la visibilité
+                // Longueur minimale de 0.1m pour garantir la visibilité
                 const longueur = Math.max(force.length() * this.forceScale, 0.1);
                 arrow.setLength(longueur, 0.15, 0.08);
             };

@@ -29,9 +29,12 @@ export class Simulation {
     private readonly MAX_TRAJECTOIRE_POINTS = 2000;
     private dernierPointTrajectoire: THREE.Vector3 = new THREE.Vector3();
 
-    // Ajout pour le logging
+    // Système de logging amélioré
     private logTimer = 0;
-    private readonly logInterval = 1.0; // en secondes
+    private readonly logInterval = 0.1; // Mise à jour toutes les 0.1s pour un suivi fluide
+    private logsBuffer: string[] = []; // Buffer circulaire pour stocker les logs
+    private readonly MAX_LOG_DURATION = 5.0; // Conservation de 5 secondes d'historique
+    private readonly MAX_LOG_ENTRIES = Math.ceil(this.MAX_LOG_DURATION / this.logInterval); // ~50 entrées
 
     constructor(conteneur: HTMLElement) {
         this.horloge = new THREE.Clock();
@@ -306,12 +309,24 @@ export class Simulation {
         );
         this.cerfVolant.mettreAJourVecteursForcesSurfaces(this.moteurPhysique.dernieresForcesAeroDetaillees);
 
-        // Logging périodique
+        // Logging périodique avec buffer circulaire
         this.logTimer += deltaTime;
         if (this.logTimer >= this.logInterval) {
             this.logTimer = 0;
             const log = this.genererRapportLog();
-            this.interfaceUtilisateur.ajouterEntreeLog(log);
+            
+            // Ajouter au buffer avec timestamp
+            const timestamp = this.horloge.elapsedTime.toFixed(1);
+            this.logsBuffer.push(`[T+${timestamp}s] ${log}`);
+            
+            // Maintenir la taille du buffer (5 secondes d'historique)
+            if (this.logsBuffer.length > this.MAX_LOG_ENTRIES) {
+                this.logsBuffer.shift();
+            }
+            
+            // Afficher les 10 dernières entrées (dernière seconde)
+            const recentLogs = this.logsBuffer.slice(-10).reverse().join('\n\n');
+            this.interfaceUtilisateur.remplacerLog(recentLogs);
         }
 
         // 6. Rendu de la scène
@@ -323,41 +338,36 @@ export class Simulation {
         const lignes = this.moteurPhysique.systemeLignes;
         const ventApparent = this.moteurPhysique.vent.getVentApparent(etat.velocite);
         
-        // Convertir l'orientation en angles d'Euler pour lisibilité
+        // Conversion de l'orientation en angles d'Euler
         const euler = new THREE.Euler().setFromQuaternion(etat.orientation, 'XYZ');
-        const pitch = (euler.x * 180 / Math.PI).toFixed(1);
-        const yaw = (euler.y * 180 / Math.PI).toFixed(1);
-        const roll = (euler.z * 180 / Math.PI).toFixed(1);
+        const pitch = (euler.x * 180 / Math.PI).toFixed(0);
+        const yaw = (euler.y * 180 / Math.PI).toFixed(0);
+        const roll = (euler.z * 180 / Math.PI).toFixed(0);
         
-        const formatVecteur = (v: THREE.Vector3) => `(${v.x.toFixed(1)}, ${v.y.toFixed(1)}, ${v.z.toFixed(1)})`;
-        const formatForce = (f: THREE.Vector3) => `${f.length().toFixed(1)}N ${formatVecteur(f)}`;
+        const formatVec = (v: THREE.Vector3) => `(${v.x.toFixed(1)},${v.y.toFixed(1)},${v.z.toFixed(1)})`;
         
-        // Calcul du détail des forces par panneau
-        const forcesParPanneau = this.moteurPhysique.dernieresForcesAeroDetaillees.map((f, i) => {
-            return `      P${i+1}: Lift=${f.forceLift.length().toFixed(1)}N, Drag=${f.forceDrag.length().toFixed(1)}N`;
-        }).join('\n');
+        // Calcul des forces aérodynamiques totales
+        const liftTotal = this.moteurPhysique.dernieresForcesAeroDetaillees
+            .reduce((sum, f) => sum + f.forceLift.length(), 0);
+        const dragTotal = this.moteurPhysique.dernieresForcesAeroDetaillees
+            .reduce((sum, f) => sum + f.forceDrag.length(), 0);
         
-        const rapport = `
-    Rapport à T+${this.horloge.elapsedTime.toFixed(1)}s
-    ---------------------------------
-    Cerf-volant:
-      - Position:  ${formatVecteur(etat.position)}
-      - Vitesse:   ${etat.velocite.length().toFixed(2)} m/s
-      - Vitesse Ang: ${etat.velociteAngulaire.length().toFixed(2)} rad/s
-      - Orientation: Pitch=${pitch}°, Yaw=${yaw}°, Roll=${roll}°
-    Vent:
-      - Apparent:  ${ventApparent.length().toFixed(1)} m/s ${formatVecteur(ventApparent)}
-    Forces:
-      - Gravité:   ${formatForce(this.moteurPhysique.derniereForceGravite)}
-      - Aéro:      ${formatForce(this.moteurPhysique.derniereForceAero)}
-${forcesParPanneau}
-      - Lignes:    ${formatForce(this.moteurPhysique.derniereForceLignes)}
-      - TOTALE:    ${formatForce(this.moteurPhysique.derniereForceTotale)}
-    Lignes:
-      - Tension G: ${lignes.derniereTensionGauche.toFixed(1)}N
-      - Tension D: ${lignes.derniereTensionDroite.toFixed(1)}N
-      - Delta L:   ${this.controleurUtilisateur.getDeltaLongueur().toFixed(2)}m
-    `;
-        return rapport.trim();
+        // Détails par panneau : normale, angle d'incidence, portance
+        const detailsPanneaux = this.moteurPhysique.dernieresForcesAeroDetaillees.map((f, i) => {
+            const dirVent = f.ventApparent.clone().normalize();
+            const cosTheta = f.normaleSurface.dot(dirVent);
+            const alpha = Math.asin(Math.abs(cosTheta)) * 180 / Math.PI;
+            return `P${i+1}:n${formatVec(f.normaleSurface)} cos${cosTheta.toFixed(2)} α${alpha.toFixed(0)}° L${f.forceLift.length().toFixed(1)}N`;
+        }).join(' | ');
+        
+        // Rapport sur deux lignes : état général + détails panneaux
+        const rapport = `Pos:${formatVec(etat.position)} V:${etat.velocite.length().toFixed(1)}m/s ` +
+            `Orient:P${pitch}°/Y${yaw}°/R${roll}° ` +
+            `VentApp:${ventApparent.length().toFixed(1)}m/s ` +
+            `Lift:${liftTotal.toFixed(1)}N Drag:${dragTotal.toFixed(1)}N ` +
+            `TensG:${lignes.derniereTensionGauche.toFixed(1)}N TensD:${lignes.derniereTensionDroite.toFixed(1)}N\n` +
+            `    ${detailsPanneaux}`;
+        
+        return rapport;
     }
 }

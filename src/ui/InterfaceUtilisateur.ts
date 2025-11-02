@@ -108,6 +108,13 @@ export class InterfaceUtilisateur {
         }
     }
 
+    public remplacerLog(contenu: string): void {
+        const logContent = document.getElementById('log-content');
+        if (logContent) {
+            logContent.innerHTML = `<pre>${contenu}</pre>`;
+        }
+    }
+
     // Méthodes pour s'abonner aux événements de l'UI
     public surChangementVent(callback: CallbackVent): void { this.onVentChange = callback; }
     public surChangementLignes(callback: CallbackLignes): void { this.onLignesChange = callback; }

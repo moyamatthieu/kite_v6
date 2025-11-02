@@ -8,7 +8,7 @@ import { GeometrieCerfVolant } from '../cerfvolant/GeometrieCerfVolant';
 export class SystemeLignes {
     private _longueurBaseLignes: number;
     private deltaLongueur = 0; // Différence de longueur entre les lignes
-    public raideur = 25; // N/m (constante de rappel du ressort)
+    public raideur = 100; // N/m (constante de rappel du ressort)
     public amortissement = 5; // Ns/m (facteur d'amortissement)
 
     // Pour le logging et le debug

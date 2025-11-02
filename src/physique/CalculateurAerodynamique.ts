@@ -70,44 +70,30 @@ export class CalculateurAerodynamique {
             const sinAlpha = Math.abs(cosTheta);
             const alpha = Math.asin(sinAlpha);
 
-            // Debug temporaire pour comprendre les normales
-            if (index < 4) {
-                console.log(`P${index+1}: normale=(${normaleMonde.x.toFixed(2)}, ${normaleMonde.y.toFixed(2)}, ${normaleMonde.z.toFixed(2)}), cosTheta=${cosTheta.toFixed(2)}, alpha=${(alpha*180/Math.PI).toFixed(0)}°`);
-            }
-
-            // CORRECTION: On génère de la portance dès qu'il y a un angle d'incidence,
+            // Modèle aérodynamique : la portance dépend de l'angle d'incidence
             // peu importe le côté de la surface que le vent frappe.
-            // La direction de la normale détermine seulement le sens de la portance.
             const alpha_stall = 25 * Math.PI / 180; // Angle de décrochage à 25°
             
             if (alpha < alpha_stall) {
-                // Modèle pré-décrochage : portance dominante
-                // Cl max augmenté à ~2.5 pour un profil cambré à alpha optimal
-                Cl = 5.0 * Math.sin(alpha) * Math.cos(alpha); // Portance proportionnelle à sin(α)cos(α)
-                // Traînée faible en régime de vol normal
-                Cd = 0.05 + 0.3 * sinAlpha * sinAlpha; // Traînée quadratique en alpha
+                // Pré-décrochage : portance dominante, traînée faible
+                Cl = 5.0 * Math.sin(alpha) * Math.cos(alpha); // Cl max ≈ 2.5 à α ≈ 45°
+                Cd = 0.05 + 0.3 * sinAlpha * sinAlpha;
             } else {
-                // Modèle post-décrochage : portance effondrée
+                // Post-décrochage : portance effondrée, traînée élevée
                 Cl = 0.5 * Math.cos(alpha);
                 Cd = 1.2 * sinAlpha;
             }
             
-            // La portance doit pointer du côté de la normale (vers l'extrados)
-            // Si cosTheta < 0, le vent frappe l'intrados, la portance va naturellement vers l'extrados (bon sens)
-            // Si cosTheta > 0, le vent frappe l'extrados, il faut inverser le signe pour que la portance aille quand même vers l'extrados
-            // CORRECTION: C'est l'inverse ! Si cosTheta > 0, pas besoin d'inverser
-            // Le produit vectoriel (vent × liftAxis) donne déjà la bonne direction
-            // On garde Cl positif, la direction est gérée par le produit vectoriel
-            if (cosTheta < 0) {
-                Cl = -Cl;
-            }
+            // Note : Cl est toujours positif. La direction du lift est gérée automatiquement
+            // par le produit vectoriel qui suit, en fonction de l'orientation de la normale.
 
             // La force de traînée est toujours dans la direction du vent apparent.
             const forceDrag = directionVent.clone().multiplyScalar(Cd * pressionDynamique * surface);
 
-            // La force de portance est perpendiculaire au vent ET dans le plan défini par la normale et le vent
-            // On utilise le produit vectoriel : normale × vent donne un axe perpendiculaire au plan
-            // Puis vent × cet axe donne la direction de portance dans le plan
+            // La force de portance est perpendiculaire au vent ET dans le plan (normale, vent)
+            // Calcul par double produit vectoriel :
+            // 1. liftAxis = normale × vent : axe perpendiculaire au plan
+            // 2. liftDirection = vent × liftAxis : direction perpendiculaire au vent, dans le plan
             const liftAxis = new THREE.Vector3().crossVectors(normaleMonde, directionVent);
             const liftDirection = new THREE.Vector3().crossVectors(directionVent, liftAxis);
 

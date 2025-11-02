@@ -113,12 +113,11 @@ export class GeometrieCerfVolant {
     private definirPanneaux(): void {
         this.panneaux = [
             // L'ordre des sommets définit la normale via la règle de la main droite (v1 × v2)
-            // Pour que la normale pointe vers l'EXTRADOS (devant, +Z), on ordonne les sommets
-            // dans le sens anti-horaire vu de face (depuis +Z)
-            // v1 = points[1] - points[0], v2 = points[2] - points[0], normale = v1 × v2
-            ['NEZ', 'BORD_GAUCHE', 'WHISKER_GAUCHE'], // Panneau 1 (gauche) - ordre inversé
+            // où v1 = points[1] - points[0] et v2 = points[2] - points[0]
+            // Les panneaux sont définis dans le sens qui génère des normales cohérentes
+            ['NEZ', 'WHISKER_GAUCHE', 'BORD_GAUCHE'], // Panneau 1 (gauche)
             ['NEZ', 'SPINE_BAS', 'WHISKER_GAUCHE'],   // Panneau 2 (arrière gauche)
-            ['NEZ', 'WHISKER_DROIT', 'BORD_DROIT'],   // Panneau 3 (droite) - ordre inversé
+            ['NEZ', 'BORD_DROIT', 'WHISKER_DROIT'],   // Panneau 3 (droite)
             ['NEZ', 'WHISKER_DROIT', 'SPINE_BAS'],    // Panneau 4 (arrière droit)
         ];
     }
