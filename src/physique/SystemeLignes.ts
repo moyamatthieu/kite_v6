@@ -10,8 +10,8 @@ export class SystemeLignes {
     private deltaLongueur = 0; // Différence de longueur entre les lignes
     
     // Paramètres physiques pour des lignes avec comportement réaliste
-    public raideur = 5000; // N/m - rigide mais pas trop pour éviter les chocs
-    public amortissement = 100; // Ns/m - amortissement très élevé pour stabilité
+    public raideur = 1; // N/m - rigide mais pas trop pour éviter les chocs
+    public amortissement = 0.11; // Ns/m - amortissement très élevé pour stabilité
 
     // Pour le logging et le debug
     public derniereTensionGauche = 0;
