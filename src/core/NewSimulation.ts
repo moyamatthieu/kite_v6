@@ -171,6 +171,10 @@ export class NewSimulation {
         
         // 8. Démarrer boucle
         this.logger.info('🪁 Nouvelle simulation initialisée !');
+        console.log('✅✅✅ NOUVELLE ARCHITECTURE CHARGÉE ✅✅✅');
+        console.log('📦 Architecture: Core/Domain/Application/Infrastructure');
+        console.log('🎯 SOLID Principles appliqués');
+        console.log('🔌 Dependency Injection active');
         this.startLoop();
     }
     

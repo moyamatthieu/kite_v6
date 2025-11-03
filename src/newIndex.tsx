@@ -4,6 +4,7 @@
  * @module newIndex
  */
 
+import './architecture-check';
 import { NewSimulation } from './core/NewSimulation';
 import { DEFAULT_CONFIG } from './core/SimulationConfig';
 import './ui/InterfaceUtilisateur.css';
@@ -53,6 +54,9 @@ function bootstrap() {
     uiPanel.innerHTML = `
         <h2 style="margin: 0 0 15px 0; font-size: 18px; text-align: center; border-bottom: 1px solid #00ff00; padding-bottom: 10px;">
             🪁 NOUVELLE SIMULATION
+            <span style="display: block; font-size: 10px; color: #00ff00; margin-top: 5px; font-weight: normal;">
+                v2.0.0 | Clean Architecture ✅
+            </span>
         </h2>
         
         <div style="margin-bottom: 15px;">
