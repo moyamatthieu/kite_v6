@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simulation de Cerf-volant V8</title>
+    <title>Simulation de Cerf-volant V8 - Legacy</title>
+    <!-- ⚠️ ANCIENNE ARCHITECTURE - Pour la NOUVELLE architecture, ouvrir /new-index.html -->
     <style>
         body {
             margin: 0;
@@ -521,13 +522,39 @@
             }
         }
     </style>
-<link rel="stylesheet" href="/index.css">
 </head>
 <body>
     <div id="container">
         <div id="app"></div>
         <div class="loading" id="loading">Chargement de la simulation...</div>
         <div class="error" id="error"></div>
+        
+        <!-- Bandeau d'avertissement Architecture Legacy -->
+        <div style="
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(135deg, #ff9800 0%, #ff5722 100%);
+            color: white;
+            padding: 12px 20px;
+            text-align: center;
+            font-weight: bold;
+            z-index: 10000;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            font-size: 14px;
+            letter-spacing: 0.5px;
+        ">
+            ⚠️ ANCIENNE ARCHITECTURE (Legacy v1.0) | 
+            Pour la NOUVELLE architecture propre : 
+            <a href="/new-index.html" style="
+                color: #fff;
+                text-decoration: underline;
+                font-weight: bold;
+                margin-left: 8px;
+                font-size: 15px;
+            ">Cliquez ici → /new-index.html</a>
+        </div>
         
         <!-- Panneau de contrôle principal -->
         <div class="ui-panel control-panel" id="control-panel">
