@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PHYSIQUE } from '../Config';
 
 /**
  * Encapsule l'état physique d'un objet (position, vitesse, orientation).
@@ -13,7 +14,7 @@ export class EtatPhysique {
 
     private positionInitiale: THREE.Vector3;
 
-    constructor(positionInitiale: THREE.Vector3, masse = 0.15, inertie = new THREE.Vector3(0.06, 0.06, 0.09)) {
+    constructor(positionInitiale: THREE.Vector3, masse = PHYSIQUE.MASSE_CERF_VOLANT, inertie = new THREE.Vector3(0.06, 0.06, 0.09)) {
         this.positionInitiale = positionInitiale.clone();
         this.masse = masse;
         // Moment d'inertie réaliste pour un kite de 0.15kg (150g) avec envergure ~1.65m

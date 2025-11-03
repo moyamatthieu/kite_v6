@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { EtatPhysique } from '../physique/EtatPhysique';
 import { Vent } from '../physique/Vent';
+import { AUTOPILOTE, CONTROLE } from '../Config';
 
 /**
  * Modes de pilotage automatique disponibles
@@ -43,11 +44,12 @@ export class AutoPilote {
     // État de référence pour les modes de maintien
     private altitudeCible: number = 8.0;
     private positionCible: THREE.Vector3 = new THREE.Vector3(0, 8, 0);
+    private longueurLignes: number = 15; // Stockée pour le calcul du zénith
     
     // Paramètres PID pour différents axes de contrôle
-    private pidAltitude: ParametresPID = { kp: 0.8, ki: 0.05, kd: 0.3 };
-    private pidLateral: ParametresPID = { kp: 1.2, ki: 0.08, kd: 0.4 };
-    private pidStabilisation: ParametresPID = { kp: 2.0, ki: 0.1, kd: 0.5 };
+    private pidAltitude: ParametresPID = AUTOPILOTE.PID_ALTITUDE;
+    private pidLateral: ParametresPID = AUTOPILOTE.PID_LATERAL;
+    private pidStabilisation: ParametresPID = AUTOPILOTE.PID_STABILISATION;
     
     // Accumulateurs pour les termes intégraux
     private erreurIntegraleAltitude = 0;
@@ -60,8 +62,8 @@ export class AutoPilote {
     private erreurPrecedenteRoll = 0;
     
     // Paramètres pour le mode trajectoire circulaire
-    private rayonCirculaire = 3.0; // Rayon du cercle en mètres
-    private vitesseAngulaire = 0.5; // Rad/s
+    private rayonCirculaire: number = AUTOPILOTE.RAYON_CIRCULAIRE;
+    private vitesseAngulaire: number = AUTOPILOTE.VITESSE_ANGULAIRE_CIRCULAIRE;
     private angleCirculaire = 0;
     private centreCircle = new THREE.Vector3(0, 8, 0);
     
@@ -70,10 +72,10 @@ export class AutoPilote {
     private progressionSequence = 0;
     
     // Limites de sécurité
-    private readonly ALTITUDE_MIN = 3.0;
-    private readonly ALTITUDE_MAX = 15.0;
-    private readonly DISTANCE_MAX = 20.0;
-    private readonly DELTA_MAX = 0.6; // Correspond au deltaMax du ControleurUtilisateur
+    private readonly ALTITUDE_MIN = AUTOPILOTE.ALTITUDE_MIN;
+    private readonly ALTITUDE_MAX = AUTOPILOTE.ALTITUDE_MAX;
+    private readonly DISTANCE_MAX = AUTOPILOTE.DISTANCE_MAX;
+    private readonly DELTA_MAX = CONTROLE.DELTA_MAX;
     
     // Vent pour calculs de compensation
     private vent: Vent;
@@ -102,9 +104,14 @@ export class AutoPilote {
     /**
      * Change le mode de pilotage automatique
      */
-    public setMode(mode: ModeAutoPilote, etatPhysique: EtatPhysique): void {
+    public setMode(mode: ModeAutoPilote, etatPhysique: EtatPhysique, longueurLignes?: number): void {
         this.mode = mode;
         this.reinitialiserAccumulateurs();
+        
+        // Stocker la longueur des lignes si fournie
+        if (longueurLignes !== undefined) {
+            this.longueurLignes = longueurLignes;
+        }
         
         // Capturer l'état actuel comme référence pour certains modes
         switch (mode) {
@@ -115,8 +122,16 @@ export class AutoPilote {
                 this.positionCible.copy(etatPhysique.position);
                 break;
             case ModeAutoPilote.ZENITH:
-                // Position zénith : directement au-dessus (X=0, Z=0) à altitude maximale
-                this.positionCible.set(0, this.ALTITUDE_MAX, 0);
+                // Position zénith : le point le plus HAUT de la sphère de vol
+                // = directement au-dessus des treuils à une distance = longueur des lignes
+                // Treuils sont en (0.25, 0.25, ±0.15), on prend le centre en (0.25, 0.25, 0)
+                // Pour être au zénith : X=0.25, Z=0, et Y tel que distance = longueurLignes
+                // Distance = sqrt((0.25-0.25)² + (Y-0.25)² + 0²) = |Y - 0.25| = longueurLignes
+                // Donc Y = 0.25 + longueurLignes
+                const stationY = 0.25;
+                const altitudeZenith = stationY + this.longueurLignes;
+                this.positionCible.set(0.25, altitudeZenith, 0);
+                console.log(`🎯 Mode ZENITH: Position cible = (0.25, ${altitudeZenith.toFixed(1)}, 0) avec longueur lignes = ${this.longueurLignes}m`);
                 break;
             case ModeAutoPilote.TRAJECTOIRE_CIRCULAIRE:
                 this.centreCircle.copy(etatPhysique.position);
@@ -223,7 +238,7 @@ export class AutoPilote {
         
         // Contrôleur PID
         this.erreurIntegraleRoll += erreur * deltaTime;
-        this.erreurIntegraleRoll = Math.max(-2, Math.min(2, this.erreurIntegraleRoll)); // Anti-windup
+        this.erreurIntegraleRoll = Math.max(-AUTOPILOTE.LIMITE_INTEGRALE_ROLL, Math.min(AUTOPILOTE.LIMITE_INTEGRALE_ROLL, this.erreurIntegraleRoll)); // Anti-windup
         
         const erreurDerivee = (erreur - this.erreurPrecedenteRoll) / deltaTime;
         this.erreurPrecedenteRoll = erreur;
@@ -245,7 +260,7 @@ export class AutoPilote {
         
         // Contrôleur PID pour l'altitude
         this.erreurIntegraleAltitude += erreur * deltaTime;
-        this.erreurIntegraleAltitude = Math.max(-3, Math.min(3, this.erreurIntegraleAltitude));
+        this.erreurIntegraleAltitude = Math.max(-AUTOPILOTE.LIMITE_INTEGRALE_ALTITUDE, Math.min(AUTOPILOTE.LIMITE_INTEGRALE_ALTITUDE, this.erreurIntegraleAltitude));
         
         const erreurDerivee = (erreur - this.erreurPrecedenteAltitude) / deltaTime;
         this.erreurPrecedenteAltitude = erreur;
@@ -280,7 +295,7 @@ export class AutoPilote {
         
         // Contrôleur PID pour l'altitude
         this.erreurIntegraleAltitude += erreurAltitude * deltaTime;
-        this.erreurIntegraleAltitude = Math.max(-3, Math.min(3, this.erreurIntegraleAltitude));
+        this.erreurIntegraleAltitude = Math.max(-AUTOPILOTE.LIMITE_INTEGRALE_ALTITUDE, Math.min(AUTOPILOTE.LIMITE_INTEGRALE_ALTITUDE, this.erreurIntegraleAltitude));
         
         const erreurDeriveeAltitude = (erreurAltitude - this.erreurPrecedenteAltitude) / deltaTime;
         this.erreurPrecedenteAltitude = erreurAltitude;
@@ -293,7 +308,7 @@ export class AutoPilote {
         // Contrôleur PID pour le déplacement latéral
         // La direction latérale détermine si on doit tirer à gauche ou à droite
         this.erreurIntegraleLateral += magnitudeErreurLaterale * deltaTime;
-        this.erreurIntegraleLateral = Math.max(-3, Math.min(3, this.erreurIntegraleLateral));
+        this.erreurIntegraleLateral = Math.max(-AUTOPILOTE.LIMITE_INTEGRALE_LATERAL, Math.min(AUTOPILOTE.LIMITE_INTEGRALE_LATERAL, this.erreurIntegraleLateral));
         
         const erreurDeriveeLateral = (magnitudeErreurLaterale - this.erreurPrecedenteLateral) / deltaTime;
         this.erreurPrecedenteLateral = magnitudeErreurLaterale;
@@ -419,9 +434,20 @@ export class AutoPilote {
                 break;
             case ModeAutoPilote.ZENITH:
                 const distanceZenith = etatPhysique.position.distanceTo(this.positionCible);
-                info += `☀️ Position ZÉNITH\n`;
-                info += `Altitude cible: ${this.ALTITUDE_MAX}m\n`;
-                info += `Distance: ${distanceZenith.toFixed(2)}m`;
+                const altitudeActuelleZ = etatPhysique.position.y;
+                const altitudeCibleZ = this.positionCible.y;
+                
+                // Calculer la distance réelle aux treuils pour vérifier qu'on respecte la longueur
+                const positionTreuil = new THREE.Vector3(0.25, 0.25, 0); // Centre des treuils
+                const distanceAuxTreuils = etatPhysique.position.distanceTo(positionTreuil);
+                
+                const distHorizontaleZ = Math.sqrt(
+                    Math.pow(etatPhysique.position.x - this.positionCible.x, 2) +
+                    Math.pow(etatPhysique.position.z - this.positionCible.z, 2)
+                );
+                info += `☀️ ZÉNITH (Longueur lignes=${this.longueurLignes.toFixed(1)}m)\n`;
+                info += `Alt: ${altitudeActuelleZ.toFixed(1)}m → ${altitudeCibleZ.toFixed(1)}m\n`;
+                info += `Dist treuils: ${distanceAuxTreuils.toFixed(1)}m | Horiz: ${distHorizontaleZ.toFixed(1)}m`;
                 break;
             case ModeAutoPilote.TRAJECTOIRE_CIRCULAIRE:
                 info += `Rayon: ${this.rayonCirculaire.toFixed(1)}m\n`;

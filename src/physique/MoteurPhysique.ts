@@ -5,6 +5,7 @@ import { SolveurContraintes } from './SolveurContraintes';
 import { SystemeLignes } from './SystemeLignes';
 import { Vent } from './Vent';
 import { GeometrieCerfVolant } from '../cerfvolant/GeometrieCerfVolant';
+import { PHYSIQUE } from '../Config';
 
 /**
  * Moteur physique principal qui orchestre tous les calculs.
@@ -16,7 +17,7 @@ export class MoteurPhysique {
     
     private calculateurAero: CalculateurAerodynamique;
     private solveurContraintes: SolveurContraintes;
-    private gravite = new THREE.Vector3(0, -9.81, 0);
+    private gravite = new THREE.Vector3(0, -PHYSIQUE.GRAVITE, 0);
     
     // Pas d'amortissement artificiel - la physique pure doit gouverner
     // L'amortissement réel vient de la traînée aérodynamique uniquement
@@ -119,13 +120,12 @@ export class MoteurPhysique {
         
         // Amortissement de stabilisation (simule la résistance de l'air non modélisée)
         // Appliqué APRÈS l'accélération pour ne pas bloquer les petits mouvements
-        const facteurAmortissement = 0.99; // Réduit de 0.98 à 0.99 pour moins de friction
-        etat.velocite.multiplyScalar(facteurAmortissement);
+        etat.velocite.multiplyScalar(PHYSIQUE.FACTEUR_AMORTISSEMENT);
         
         // Utilisation de l'inertie pour un calcul physiquement correct de l'accélération angulaire
         const accelerationAngulaire = coupleTotal.clone().divide(etat.inertie);
         etat.velociteAngulaire.add(accelerationAngulaire.multiplyScalar(deltaTime));
-        etat.velociteAngulaire.multiplyScalar(facteurAmortissement); // Amortissement angulaire APRÈS aussi
+        etat.velociteAngulaire.multiplyScalar(PHYSIQUE.FACTEUR_AMORTISSEMENT); // Amortissement angulaire APRÈS aussi
 
         // Garde-fou contre les valeurs NaN ou infinies
         if (!isFinite(etat.velocite.x) || !isFinite(etat.velocite.y) || !isFinite(etat.velocite.z)) {
@@ -138,13 +138,11 @@ export class MoteurPhysique {
         }
         
         // Limiter les vitesses extrêmes pour la stabilité numérique
-        const vitesseMax = 30; // m/s (108 km/h) - réduit pour plus de stabilité
-        if (etat.velocite.lengthSq() > vitesseMax * vitesseMax) {
-            etat.velocite.normalize().multiplyScalar(vitesseMax);
+        if (etat.velocite.lengthSq() > PHYSIQUE.VITESSE_MAX * PHYSIQUE.VITESSE_MAX) {
+            etat.velocite.normalize().multiplyScalar(PHYSIQUE.VITESSE_MAX);
         }
-        const vitesseAngMax = 8; // rad/s - réduit pour éviter les rotations folles
-        if (etat.velociteAngulaire.lengthSq() > vitesseAngMax * vitesseAngMax) {
-            etat.velociteAngulaire.normalize().multiplyScalar(vitesseAngMax);
+        if (etat.velociteAngulaire.lengthSq() > PHYSIQUE.VITESSE_ANGULAIRE_MAX * PHYSIQUE.VITESSE_ANGULAIRE_MAX) {
+            etat.velociteAngulaire.normalize().multiplyScalar(PHYSIQUE.VITESSE_ANGULAIRE_MAX);
         }
 
         // 5. Mise à jour de la position et de l'orientation

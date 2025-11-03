@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GEOMETRIE } from '../Config';
 
 export interface ParametresBrides {
     nez: number;
@@ -24,14 +25,14 @@ export class GeometrieCerfVolant {
     public panneaux: string[][] = [];
 
     // Paramètres par défaut
-    public envergure = 1.65;
-    public hauteur = 0.65;
-    public profondeur = 0.15;
-    public diametreStructure = 0.01;
+    public envergure = GEOMETRIE.ENVERGURE;
+    public hauteur = GEOMETRIE.HAUTEUR;
+    public profondeur = GEOMETRIE.PROFONDEUR;
+    public diametreStructure = GEOMETRIE.DIAMETRE_STRUCTURE;
     public parametresBrides: ParametresBrides = {
-        nez: 0.65,      // Longueur de la bride du nez au point de contrôle
-        inter: 0.65,    // Longueur de la bride du point intermédiaire au point de contrôle
-        centre: 0.65    // Longueur de la bride du centre au point de contrôle
+        nez: GEOMETRIE.BRIDES.NEZ,
+        inter: GEOMETRIE.BRIDES.INTER,
+        centre: GEOMETRIE.BRIDES.CENTRE,
     };
 
     constructor(parametres?: Partial<ParametresGeometrie>) {

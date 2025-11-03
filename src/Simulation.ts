@@ -7,6 +7,7 @@ import { StationControle } from './controles/StationControle';
 import { ControleurUtilisateur } from './controles/ControleurUtilisateur';
 import { AutoPilote, ModeAutoPilote } from './controles/AutoPilote';
 import { InterfaceUtilisateur } from './ui/InterfaceUtilisateur';
+import { UI, COORDONNEES } from './Config';
 
 /**
  * Classe principale de la simulation.
@@ -27,14 +28,14 @@ export class Simulation {
     // Ajouts pour la trajectoire
     private trajectoire!: THREE.Line;
     private trajectoirePoints: THREE.Vector3[] = [];
-    private readonly MAX_TRAJECTOIRE_POINTS = 2000;
+    private readonly MAX_TRAJECTOIRE_POINTS = UI.MAX_TRAJECTOIRE_POINTS;
     private dernierPointTrajectoire: THREE.Vector3 = new THREE.Vector3();
 
     // Système de logging amélioré
     private logTimer = 0;
-    private readonly logInterval = 0.5; // Mise à jour toutes les 0.5s pour un journal plus lisible
-    private logsBuffer: string[] = []; // Buffer circulaire pour stocker les logs
-    private readonly MAX_LOG_ENTRIES = 8; // Garder les 8 dernières entrées (4 secondes d'historique)
+    private readonly logInterval = UI.LOG_INTERVAL;
+    private logsBuffer: string[] = [];
+    private readonly MAX_LOG_ENTRIES = UI.MAX_LOG_ENTRIES;
 
     constructor(conteneur: HTMLElement) {
         this.horloge = new THREE.Clock();
@@ -113,9 +114,22 @@ export class Simulation {
         });
         
         this.interfaceUtilisateur.surChangementModeAutoPilote((mode) => {
-            this.controleurUtilisateur.changerModeAutoPilote(mode, this.moteurPhysique.etatCerfVolant);
+            const longueurLignes = this.moteurPhysique.systemeLignes.longueurLignes;
+            this.controleurUtilisateur.changerModeAutoPilote(mode, this.moteurPhysique.etatCerfVolant, longueurLignes);
             this.interfaceUtilisateur.mettreAJourBoutonsModes(mode);
             console.log(`Mode autopilote: ${mode}`);
+        });
+        
+        // Connecter le slider de contrôle
+        this.interfaceUtilisateur.surSliderControl((delta) => {
+            // Définir le delta dans le contrôleur utilisateur
+            this.controleurUtilisateur.setDeltaSlider(delta);
+        });
+        
+        // Connecter le callback pour que clavier/autopilote mettent à jour le slider
+        this.controleurUtilisateur.surChangementDelta((delta) => {
+            // Mettre à jour le slider visuel quand clavier ou autopilote change le delta
+            this.interfaceUtilisateur.mettreAJourSliderVisuel(delta);
         });
     }
     
@@ -149,20 +163,10 @@ export class Simulation {
         this.moteurPhysique.systemeLignes.reinitialiserTensionsLissees();
         
         // ORIENTATION INITIALE: Le cerf-volant doit être orienté avec l'intrados face au vent
-        // Géométrie locale par défaut :
-        // - NEZ en (0, hauteur, 0) : pointe vers Y+ (le haut)
-        // - Normale des panneaux : pointe vers Z+ (vers l'extrados)
-        // - Intrados : face opposée, donc Z- 
-        
-        // Objectif après rotation :
-        // - NEZ doit toujours pointer vers Y+ (le haut)
-        // - Intrados (Z- local) doit faire face au vent venant de X+
-        // - Donc Z- local doit devenir X+ global
-        // - Ce qui signifie Z+ local doit devenir X- global
-        
         // Rotation de -90° sur Y : Z+ → X-, X+ → Z+, Y → Y
         const orientationInitiale = new THREE.Quaternion();
-        orientationInitiale.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
+        const axeRotation = new THREE.Vector3(COORDONNEES.ROTATION_INITIALE.AXE.x, COORDONNEES.ROTATION_INITIALE.AXE.y, COORDONNEES.ROTATION_INITIALE.AXE.z);
+        orientationInitiale.setFromAxisAngle(axeRotation, COORDONNEES.ROTATION_INITIALE.ANGLE);
         this.moteurPhysique.etatCerfVolant.orientation.copy(orientationInitiale);
         
         // Réinitialiser les vitesses après avoir défini l'orientation
@@ -172,6 +176,14 @@ export class Simulation {
         this.stationControle.reinitialiser();
         this.cerfVolant.reinitialiser(this.moteurPhysique.etatCerfVolant.position);
         this.reinitialiserTrajectoire();
+        
+        // Réinitialiser le contrôleur utilisateur (delta, slider, autopilote)
+        this.controleurUtilisateur.reinitialiser();
+        
+        // Vider le buffer de logs et réinitialiser l'horloge lors du reset
+        this.logsBuffer = [];
+        this.logTimer = 0;
+        this.horloge = new THREE.Clock(); // Réinitialiser l'horloge pour repartir de T+0.00s
         
         const message = estInitialisation 
             ? `🪁 Bienvenue dans le simulateur de cerf-volant !
@@ -299,7 +311,7 @@ Simulation initialisée et prête à voler !`
 
     private mettreAJourTrajectoire(): void {
         const positionActuelle = this.moteurPhysique.etatCerfVolant.position;
-        if (positionActuelle.distanceTo(this.dernierPointTrajectoire) > 0.2) {
+        if (positionActuelle.distanceTo(this.dernierPointTrajectoire) > UI.DISTANCE_MIN_TRAJECTOIRE) {
             this.trajectoirePoints.push(positionActuelle.clone());
             this.dernierPointTrajectoire.copy(positionActuelle);
 
@@ -320,7 +332,8 @@ Simulation initialisée et prête à voler !`
         if (this.estEnPause) return;
         
         // 1. Mettre à jour les contrôles utilisateur (avec autopilote si actif)
-        this.controleurUtilisateur.mettreAJour(deltaTime, this.moteurPhysique.etatCerfVolant);
+        const longueurLignes = this.moteurPhysique.systemeLignes.longueurLignes;
+        this.controleurUtilisateur.mettreAJour(deltaTime, this.moteurPhysique.etatCerfVolant, longueurLignes);
         this.moteurPhysique.systemeLignes.setDelta(this.controleurUtilisateur.getDeltaLongueur());
 
         // 2. Mettre à jour le moteur physique
@@ -342,11 +355,14 @@ Simulation initialisée et prête à voler !`
         // 5. Mettre à jour l'interface utilisateur (debug, log, indicateur de pilotage)
         this.interfaceUtilisateur.mettreAJourInfosDebug(this.moteurPhysique, this.cerfVolant);
         const infosAutoPilote = this.controleurUtilisateur.getInfosAutoPilote(this.moteurPhysique.etatCerfVolant);
+        const deltaActuel = this.controleurUtilisateur.getDeltaLongueur();
         this.interfaceUtilisateur.mettreAJourIndicateurPilotage(
             this.controleurUtilisateur.estActif(), 
-            this.controleurUtilisateur.getDeltaLongueur(),
+            deltaActuel,
             infosAutoPilote
         );
+        // Mettre à jour le slider visuel pour refléter le delta actuel (clavier, autopilote ou slider)
+        this.interfaceUtilisateur.mettreAJourSliderVisuel(deltaActuel);
         this.cerfVolant.mettreAJourVecteursForces(
             this.moteurPhysique.derniereForceAero,
             this.moteurPhysique.derniereForceGravite,
@@ -364,8 +380,8 @@ Simulation initialisée et prête à voler !`
             const log = this.genererRapportLog();
             
             // Ajouter au buffer avec timestamp formaté
-            const timestamp = this.horloge.elapsedTime.toFixed(1);
-            this.logsBuffer.push(`━━━━━ T+${timestamp}s ━━━━━\n${log}`);
+            const timestamp = this.horloge.elapsedTime.toFixed(2);
+            this.logsBuffer.push(`T+${timestamp}s\n${log}`);
             
             // Maintenir la taille du buffer
             if (this.logsBuffer.length > this.MAX_LOG_ENTRIES) {
@@ -373,7 +389,7 @@ Simulation initialisée et prête à voler !`
             }
             
             // Afficher toutes les entrées du buffer (plus récent en haut)
-            const recentLogs = this.logsBuffer.slice().reverse().join('\n\n');
+            const recentLogs = this.logsBuffer.slice().reverse().join('\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n');
             this.interfaceUtilisateur.remplacerLog(recentLogs);
         }
 
@@ -392,44 +408,64 @@ Simulation initialisée et prête à voler !`
         const yaw = (euler.y * 180 / Math.PI).toFixed(0);
         const roll = (euler.z * 180 / Math.PI).toFixed(0);
         
-        const formatVec = (v: THREE.Vector3) => `(${v.x.toFixed(1)}, ${v.y.toFixed(1)}, ${v.z.toFixed(1)})`;
-        
         // Calcul des forces aérodynamiques totales
         const liftTotal = this.moteurPhysique.dernieresForcesAeroDetaillees
             .reduce((sum, f) => sum + f.forceLift.length(), 0);
         const dragTotal = this.moteurPhysique.dernieresForcesAeroDetaillees
             .reduce((sum, f) => sum + f.forceDrag.length(), 0);
         
-        // Détails par panneau avec formatage amélioré
-        const detailsPanneaux = this.moteurPhysique.dernieresForcesAeroDetaillees.map((f, i) => {
+        // Calcul de l'angle d'attaque moyen
+        const alphaMoyen = this.moteurPhysique.dernieresForcesAeroDetaillees.reduce((sum, f) => {
             const dirVent = f.ventApparent.clone().normalize();
             const cosTheta = f.normaleSurface.dot(dirVent);
-            const alpha = Math.asin(Math.abs(cosTheta)) * 180 / Math.PI;
-            const liftStr = f.forceLift.length().toFixed(1);
-            const dragStr = f.forceDrag.length().toFixed(1);
-            return `  └─ Panneau ${i+1}: α=${alpha.toFixed(0)}° | Portance=${liftStr}N | Traînée=${dragStr}N`;
-        }).join('\n');
+            return sum + Math.asin(Math.abs(cosTheta)) * 180 / Math.PI;
+        }, 0) / this.moteurPhysique.dernieresForcesAeroDetaillees.length;
         
-        // Rapport structuré et lisible
+        // Calcul des forces totales et vérification cohérence
+        const forceTotale = this.moteurPhysique.derniereForceTotale.length();
+        const forceAero = this.moteurPhysique.derniereForceAero.length();
+        const forceGrav = this.moteurPhysique.derniereForceGravite.length();
+        const forceLignes = this.moteurPhysique.derniereForceLignes.length();
+        
+        // Vecteur accélération pour diagnostics
+        const accel = this.moteurPhysique.derniereForceTotale.clone().divideScalar(etat.masse);
+        const accelVert = accel.y;
+        const accelVertStr = accelVert.toFixed(1);
+        
+        // Indicateur d'accélération verticale
+        let accelIndicateur = '';
+        if (accelVert > 20) accelIndicateur = '⬆️'; // Forte accélération vers le haut
+        else if (accelVert < -20) accelIndicateur = '⬇️'; // Forte accélération vers le bas
+        else if (accelVert > 10) accelIndicateur = '↗️';
+        else if (accelVert < -10) accelIndicateur = '↘️';
+        
+        // Détection d'anomalies multiples
+        const tensionMax = Math.max(lignes.derniereTensionGauche, lignes.derniereTensionDroite);
+        const deltaTension = Math.abs(lignes.derniereTensionGauche - lignes.derniereTensionDroite);
+        const tensionFaible = tensionMax < 0.5;
+        const orientationAnormale = Math.abs(parseFloat(pitch)) > 85 || Math.abs(parseFloat(roll)) > 85;
+        
+        // Distance aux treuils pour diagnostic
+        const posPoignees = this.stationControle.getPositionsPoignees();
+        const distGauche = etat.position.distanceTo(posPoignees.gauche);
+        const distDroite = etat.position.distanceTo(posPoignees.droite);
+        const distMax = Math.max(distGauche, distDroite);
+        const longueurLignes = this.moteurPhysique.systemeLignes.longueurLignes;
+        const surExtension = distMax > longueurLignes * 1.02; // Alerte si > 2% de dépassement
+        
+        let alerte = '';
+        if (tensionMax > 100) alerte = '⚠️TENSION! ';
+        else if (deltaTension > 50) alerte = '⚡ASYM! ';
+        else if (tensionFaible) alerte = '🔻MOUS ';
+        else if (surExtension) alerte = '�LONG ';
+        else if (orientationAnormale) alerte = '🔄PLAT ';
+        
+        // Rapport condensé et structuré
         const rapport = 
-`📍 POSITION & MOUVEMENT
-   Position: ${formatVec(etat.position)} m
-   Vitesse: ${etat.velocite.length().toFixed(2)} m/s ${formatVec(etat.velocite)}
-   Altitude: ${etat.position.y.toFixed(1)} m
-
-🎯 ORIENTATION
-   Tangage: ${pitch}° | Lacet: ${yaw}° | Roulis: ${roll}°
-
-💨 AÉRODYNAMIQUE
-   Vent apparent: ${ventApparent.length().toFixed(1)} m/s
-   Portance totale: ${liftTotal.toFixed(1)} N
-   Traînée totale: ${dragTotal.toFixed(1)} N
-${detailsPanneaux}
-
-🔗 TENSIONS DES LIGNES
-   Ligne gauche: ${lignes.derniereTensionGauche.toFixed(1)} N
-   Ligne droite: ${lignes.derniereTensionDroite.toFixed(1)} N
-   Delta: ${Math.abs(lignes.derniereTensionGauche - lignes.derniereTensionDroite).toFixed(1)} N`;
+`${alerte}Pos(${etat.position.x.toFixed(1)},${etat.position.y.toFixed(1)},${etat.position.z.toFixed(1)}) V=${etat.velocite.length().toFixed(1)}m/s ${accelIndicateur}AccY=${accelVertStr}
+🎯 P${pitch}° Y${yaw}° R${roll}° α=${alphaMoyen.toFixed(0)}° | Vent=${ventApparent.length().toFixed(1)}m/s L=${liftTotal.toFixed(1)}N D=${dragTotal.toFixed(1)}N
+🔗 G:${lignes.derniereTensionGauche.toFixed(1)}N(${distGauche.toFixed(1)}m) D:${lignes.derniereTensionDroite.toFixed(1)}N(${distDroite.toFixed(1)}m) Δ=${deltaTension.toFixed(1)}N | Max=${longueurLignes.toFixed(0)}m
+⚡ Aéro=${forceAero.toFixed(1)}N Grav=${forceGrav.toFixed(1)}N Lignes=${forceLignes.toFixed(1)}N → Total=${forceTotale.toFixed(1)}N`;
         
         return rapport;
     }

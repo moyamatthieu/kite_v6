@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { EtatPhysique } from './EtatPhysique';
 import { GeometrieCerfVolant } from '../cerfvolant/GeometrieCerfVolant';
+import { LIGNES } from '../Config';
 
 /**
  * Gère les propriétés et les forces des lignes de contrôle.
@@ -10,22 +11,15 @@ export class SystemeLignes {
     private deltaLongueur = 0; // Différence de longueur entre les lignes
     
     // Paramètres physiques optimisés pour stabilité ET réalisme
-    // ÉQUILIBRE CRITIQUE : raideur et amortissement doivent être cohérents
-    // Amortissement critique = 2√(k×m) ≈ 2√(150×0.5) ≈ 17 Ns/m
-    // On utilise 2× critique (34 Ns/m) pour un sur-amortissement stable
-    public raideur = 10; // N/m - compromis entre réalisme et stabilité
-    public amortissement = 10; // Ns/m - sur-amortissement (2× critique)
-    public tensionMin = 0.008; // N - tension minimale réaliste (poids des lignes)
+    public raideur = LIGNES.RAIDEUR;
+    public amortissement = LIGNES.AMORTISSEMENT;
+    public tensionMin = LIGNES.TENSION_MIN;
     
-    // Longueur au repos : 97% de la longueur nominale
-    // Cela crée une pré-tension qui évite les discontinuités tension = 0
-    private readonly RATIO_LONGUEUR_REPOS = 0.99;
+    // Longueur au repos : définie par ratio
+    private readonly RATIO_LONGUEUR_REPOS = LIGNES.RATIO_LONGUEUR_REPOS;
     
-    // LISSAGE TEMPOREL : Filtre passe-bas pour éviter les variations brutales de tension
-    // qui créent des accélérations explosives perturbant les calculs aérodynamiques
-    // coefficientLissage = α : plus α est petit, plus le lissage est fort
-    // α=0.5 signifie : tension_lissée = 50% nouvelle + 50% ancienne
-    public coefficientLissage = 0.45; // Lissage significatif pour stabilité
+    // LISSAGE TEMPOREL
+    public coefficientLissage = LIGNES.COEFFICIENT_LISSAGE;
     private tensionLisseeGauche = 0.8; // Initialisé à tension_min
     private tensionLisseeDroite = 0.8; // Initialisé à tension_min
 
@@ -35,7 +29,7 @@ export class SystemeLignes {
     public derniereForceGauche = new THREE.Vector3();
     public derniereForceDroite = new THREE.Vector3();
 
-    constructor(longueurInitiale = 15) {
+    constructor(longueurInitiale = LIGNES.LONGUEUR_BASE) {
         this._longueurBaseLignes = longueurInitiale;
     }
 
@@ -44,7 +38,7 @@ export class SystemeLignes {
     }
 
     public set longueurLignes(valeur: number) {
-        this._longueurBaseLignes = Math.max(5, Math.min(100, valeur));
+        this._longueurBaseLignes = Math.max(LIGNES.LONGUEUR_MIN, Math.min(LIGNES.LONGUEUR_MAX, valeur));
     }
 
     public setDelta(delta: number): void {
@@ -170,8 +164,7 @@ export class SystemeLignes {
             tension = forceRappel + forceAmortissement;
             
             // Limitation douce : tension entre min et max
-            const tensionMax = 200; // N - limite pour éviter forces explosives
-            tension = Math.max(this.tensionMin, Math.min(tension, tensionMax));
+            tension = Math.max(this.tensionMin, Math.min(LIGNES.TENSION_MAX, tension));
         }
         
         // Sécurité : tension ne peut pas être négative

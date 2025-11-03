@@ -10,6 +10,7 @@ type CallbackBrides = (type: 'nez' | 'inter' | 'centre', longueur: number) => vo
 type CallbackDebug = (actif: boolean) => void;
 type CallbackAutoPiloteToggle = () => void;
 type CallbackAutoPiloteMode = (mode: ModeAutoPilote) => void;
+type CallbackSliderControl = (delta: number) => void;
 
 /**
  * Gère les interactions avec les éléments de l'interface (DOM).
@@ -23,8 +24,10 @@ export class InterfaceUtilisateur {
     private onDebugChange: CallbackDebug = () => {};
     private onAutoPiloteToggle: CallbackAutoPiloteToggle = () => {};
     private onAutoPiloteMode: CallbackAutoPiloteMode = () => {};
+    private onSliderControl: CallbackSliderControl = () => {};
     
     public debugActif = true;
+    private sliderUtilisateurActif = false; // Flag pour savoir si c'est l'utilisateur qui manipule le slider
 
     constructor(onReset: () => void, onTogglePause: () => void) {
         this.onReset = onReset;
@@ -102,6 +105,9 @@ export class InterfaceUtilisateur {
         
         // Initialiser les contrôles de l'autopilote
         this.initialiserControlesAutoPilote();
+        
+        // Initialiser le slider de contrôle
+        this.initialiserSliderControle();
     }
     
     private lierBouton(id: string, action: () => void): void {
@@ -177,6 +183,7 @@ export class InterfaceUtilisateur {
     public surChangementDebug(callback: CallbackDebug): void { this.onDebugChange = callback; }
     public surToggleAutoPilote(callback: CallbackAutoPiloteToggle): void { this.onAutoPiloteToggle = callback; }
     public surChangementModeAutoPilote(callback: CallbackAutoPiloteMode): void { this.onAutoPiloteMode = callback; }
+    public surSliderControl(callback: CallbackSliderControl): void { this.onSliderControl = callback; }
 
     /**
      * Initialise les contrôles de l'autopilote (boutons de mode)
@@ -199,6 +206,72 @@ export class InterfaceUtilisateur {
                 }
             });
         });
+    }
+    
+    /**
+     * Initialise le slider de contrôle centralisé
+     */
+    private initialiserSliderControle(): void {
+        const slider = document.getElementById('control-slider') as HTMLInputElement;
+        const sliderValue = document.getElementById('slider-value');
+        const leftLabel = document.getElementById('left-label');
+        const rightLabel = document.getElementById('right-label');
+        
+        if (!slider || !sliderValue) return;
+        
+        // Détecter quand l'utilisateur commence à manipuler le slider
+        slider.addEventListener('mousedown', () => {
+            this.sliderUtilisateurActif = true;
+        });
+        
+        slider.addEventListener('touchstart', () => {
+            this.sliderUtilisateurActif = true;
+        });
+        
+        slider.addEventListener('input', () => {
+            // Ne traiter que si c'est l'utilisateur qui manipule
+            if (!this.sliderUtilisateurActif) return;
+            
+            const value = parseFloat(slider.value);
+            const percent = Math.abs(value);
+            
+            // Mettre à jour l'affichage
+            if (value < -2) {
+                sliderValue.textContent = `← GAUCHE (${percent}%)`;
+                leftLabel?.classList.add('active');
+                rightLabel?.classList.remove('active');
+            } else if (value > 2) {
+                sliderValue.textContent = `DROITE → (${percent}%)`;
+                rightLabel?.classList.add('active');
+                leftLabel?.classList.remove('active');
+            } else {
+                sliderValue.textContent = 'NEUTRE (0%)';
+                leftLabel?.classList.remove('active');
+                rightLabel?.classList.remove('active');
+            }
+            
+            // Convertir la valeur du slider (-50 à +50) en delta (-0.5 à +0.5)
+            // Inversion : slider gauche (négatif) = delta positif (raccourcir gauche)
+            const delta = -value / 100;
+            this.onSliderControl(delta);
+        });
+        
+        // Revenir au centre quand on relâche le slider
+        const resetSlider = () => {
+            this.sliderUtilisateurActif = false;
+            slider.value = '0';
+            if (sliderValue) sliderValue.textContent = 'NEUTRE (0%)';
+            leftLabel?.classList.remove('active');
+            rightLabel?.classList.remove('active');
+            this.onSliderControl(0);
+        };
+        
+        slider.addEventListener('mouseup', resetSlider);
+        slider.addEventListener('mouseleave', resetSlider); // Aussi quand la souris sort
+        
+        // Également pour les appareils tactiles
+        slider.addEventListener('touchend', resetSlider);
+        slider.addEventListener('touchcancel', resetSlider); // Si le touch est annulé
     }
     
     /**
@@ -284,11 +357,52 @@ export class InterfaceUtilisateur {
             indicateur.innerHTML = `🤖 ${infosAutoPilote.replace('\n', '<br>')}`;
         } else if (estActif) {
             indicateur.classList.add('active');
-            const direction = deltaLongueur > 0.1 ? 'GAUCHE ←' : deltaLongueur < -0.1 ? 'DROITE →' : 'CENTRE';
+            const deltaPercent = (deltaLongueur * 100).toFixed(0);
+            const direction = deltaLongueur > 0.1 ? `GAUCHE ← (${deltaPercent}%)` : 
+                            deltaLongueur < -0.1 ? `DROITE → (${Math.abs(parseFloat(deltaPercent))}%)` : 
+                            'CENTRE';
             indicateur.textContent = `🎮 Pilotage: ${direction}`;
         } else {
             indicateur.classList.remove('active');
             indicateur.textContent = '🎮 Pilotage: Repos';
+        }
+    }
+    
+    /**
+     * Met à jour visuellement le slider de contrôle pour refléter le delta actuel
+     * (que ce soit du clavier, de l'autopilote ou du slider lui-même)
+     */
+    public mettreAJourSliderVisuel(delta: number): void {
+        // Ne pas mettre à jour si l'utilisateur est en train de manipuler le slider
+        if (this.sliderUtilisateurActif) return;
+        
+        const slider = document.getElementById('control-slider') as HTMLInputElement;
+        const sliderValue = document.getElementById('slider-value');
+        const leftLabel = document.getElementById('left-label');
+        const rightLabel = document.getElementById('right-label');
+        
+        if (!slider || !sliderValue) return;
+        
+        // Convertir delta (-0.5 à +0.5) en valeur slider (-50 à +50)
+        // Inversion : delta positif (gauche) → slider négatif (curseur à gauche)
+        const valeurSlider = Math.round(-delta * 100);
+        slider.value = valeurSlider.toString();
+        
+        const percent = Math.abs(valeurSlider);
+        
+        // Mettre à jour l'affichage
+        if (valeurSlider < -2) {
+            sliderValue.textContent = `← GAUCHE (${percent}%)`;
+            leftLabel?.classList.add('active');
+            rightLabel?.classList.remove('active');
+        } else if (valeurSlider > 2) {
+            sliderValue.textContent = `DROITE → (${percent}%)`;
+            rightLabel?.classList.add('active');
+            leftLabel?.classList.remove('active');
+        } else {
+            sliderValue.textContent = 'NEUTRE (0%)';
+            leftLabel?.classList.remove('active');
+            rightLabel?.classList.remove('active');
         }
     }
 }

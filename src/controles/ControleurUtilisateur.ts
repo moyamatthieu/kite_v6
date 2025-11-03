@@ -1,5 +1,6 @@
 import { AutoPilote, ModeAutoPilote } from './AutoPilote';
 import { EtatPhysique } from '../physique/EtatPhysique';
+import { CONTROLE } from '../Config';
 
 /**
  * Gère les entrées clavier de l'utilisateur pour contrôler les treuils de la station.
@@ -9,13 +10,18 @@ export class ControleurUtilisateur {
     private deltaLongueur = 0;
     private touchesAppuyees = new Set<string>();
     
-    private vitesseDelta = 0.8; // Vitesse de changement de longueur en m/s
-    private vitesseRetour = 1.0; // Vitesse de retour à 0
-    private deltaMax = 0.6; // 60cm de différence de longueur totale max
+    private vitesseDelta = CONTROLE.VITESSE_DELTA;
+    private vitesseRetour = CONTROLE.VITESSE_RETOUR;
+    private deltaMax = CONTROLE.DELTA_MAX;
     
     // Système d'autopilotage
     public autoPilote?: AutoPilote;
     private modeEnAttente?: ModeAutoPilote; // Mode à appliquer lors de la prochaine mise à jour
+    
+    // Contrôle externe via slider
+    private sliderActif = false;
+    private deltaSlider = 0;
+    private onDeltaChange?: (delta: number) => void; // Callback pour notifier le slider
 
     constructor() {
         this.configurerControlesClavier();
@@ -25,7 +31,8 @@ export class ControleurUtilisateur {
      * Retourne true si l'utilisateur est en train d'appuyer sur des touches de pilotage.
      */
     public estActif(): boolean {
-        return this.touchesAppuyees.has('arrowleft') || this.touchesAppuyees.has('q') ||
+        return this.sliderActif || 
+               this.touchesAppuyees.has('arrowleft') || this.touchesAppuyees.has('q') ||
                this.touchesAppuyees.has('arrowright') || this.touchesAppuyees.has('d');
     }
     
@@ -83,49 +90,64 @@ export class ControleurUtilisateur {
     }
 
     /**
-     * Met à jour le delta de longueur en fonction des touches appuyées.
-     * Si l'autopilote est actif, utilise sa commande au lieu de l'entrée manuelle.
+     * Met à jour le delta de longueur via le slider (seule source de contrôle).
+     * Hiérarchie: clavier/autopilote → deltaSlider → deltaLongueur
      * À appeler à chaque frame.
      */
-    public mettreAJour(deltaTime: number, etatPhysique?: EtatPhysique): void {
+    public mettreAJour(deltaTime: number, etatPhysique?: EtatPhysique, longueurLignes?: number): void {
         // Appliquer le mode en attente si nécessaire
         if (this.modeEnAttente && etatPhysique && this.autoPilote) {
-            this.autoPilote.setMode(this.modeEnAttente, etatPhysique);
+            this.autoPilote.setMode(this.modeEnAttente, etatPhysique, longueurLignes);
             this.modeEnAttente = undefined;
         }
         
-        // Si l'autopilote est actif et un état physique est fourni, utiliser sa commande
-        if (this.autoPilote?.estActif() && etatPhysique) {
-            this.deltaLongueur = this.autoPilote.calculerCommande(etatPhysique, deltaTime);
-            return;
+        // Déterminer la commande cible selon priorité
+        let deltaTarget = 0;
+        
+        // Priorité 1 : Slider utilisateur (manipulation directe)
+        if (this.sliderActif) {
+            deltaTarget = this.deltaSlider;
         }
-        
-        // Sinon, contrôle manuel
-        const gauche = this.touchesAppuyees.has('arrowleft') || this.touchesAppuyees.has('q');
-        const droite = this.touchesAppuyees.has('arrowright') || this.touchesAppuyees.has('d');
-        
-        // Gauche = delta positif (raccourcit ligne gauche), Droite = delta négatif (raccourcit ligne droite)
-        const direction = (gauche ? 1 : 0) - (droite ? 1 : 0);
+        // Priorité 2 : Autopilote
+        else if (this.autoPilote?.estActif() && etatPhysique) {
+            deltaTarget = this.autoPilote.calculerCommande(etatPhysique, deltaTime);
+        }
+        // Priorité 3 : Clavier
+        else {
+            const gauche = this.touchesAppuyees.has('arrowleft') || this.touchesAppuyees.has('q');
+            const droite = this.touchesAppuyees.has('arrowright') || this.touchesAppuyees.has('d');
+            
+            // Gauche = delta positif (raccourcit ligne gauche), Droite = delta négatif (raccourcit ligne droite)
+            const direction = (gauche ? 1 : 0) - (droite ? 1 : 0);
 
-        if (direction !== 0) {
-            // Appliquer le changement de longueur
-            this.deltaLongueur += direction * this.vitesseDelta * deltaTime;
-        } else {
-            // Retourner progressivement à zéro
-            if (Math.abs(this.deltaLongueur) > 0.01) {
-                const signe = Math.sign(this.deltaLongueur);
-                this.deltaLongueur -= signe * this.vitesseRetour * deltaTime;
-                // Éviter l'oscillation autour de zéro
-                if (Math.sign(this.deltaLongueur) !== signe) {
-                    this.deltaLongueur = 0;
-                }
+            if (direction !== 0) {
+                // Appliquer le changement de longueur progressif
+                deltaTarget = this.deltaLongueur + direction * this.vitesseDelta * deltaTime;
             } else {
-                this.deltaLongueur = 0;
+                // Retourner progressivement à zéro
+                if (Math.abs(this.deltaLongueur) > 0.01) {
+                    const signe = Math.sign(this.deltaLongueur);
+                    deltaTarget = this.deltaLongueur - signe * this.vitesseRetour * deltaTime;
+                    // Éviter l'oscillation autour de zéro
+                    if (Math.sign(deltaTarget) !== signe) {
+                        deltaTarget = 0;
+                    }
+                } else {
+                    deltaTarget = 0;
+                }
             }
         }
         
-        // Limiter le delta
-        this.deltaLongueur = Math.max(-this.deltaMax, Math.min(this.deltaMax, this.deltaLongueur));
+        // Limiter le delta cible
+        deltaTarget = Math.max(-this.deltaMax, Math.min(this.deltaMax, deltaTarget));
+        
+        // Le deltaLongueur suit TOUJOURS le slider (mise à jour via callback externe)
+        this.deltaLongueur = deltaTarget;
+        
+        // Notifier le slider de la nouvelle valeur (clavier/autopilote → slider → cerf-volant)
+        if (!this.sliderActif && this.onDeltaChange) {
+            this.onDeltaChange(deltaTarget);
+        }
     }
     
     /**
@@ -133,6 +155,13 @@ export class ControleurUtilisateur {
      */
     public getDeltaLongueur(): number {
         return this.deltaLongueur;
+    }
+    
+    /**
+     * Définit le callback appelé quand le delta change (pour synchroniser le slider)
+     */
+    public surChangementDelta(callback: (delta: number) => void): void {
+        this.onDeltaChange = callback;
     }
     
     /**
@@ -145,7 +174,38 @@ export class ControleurUtilisateur {
     /**
      * Permet de changer le mode de l'autopilote depuis l'extérieur
      */
-    public changerModeAutoPilote(mode: ModeAutoPilote, etatPhysique: EtatPhysique): void {
-        this.autoPilote?.setMode(mode, etatPhysique);
+    public changerModeAutoPilote(mode: ModeAutoPilote, etatPhysique: EtatPhysique, longueurLignes?: number): void {
+        this.autoPilote?.setMode(mode, etatPhysique, longueurLignes);
+    }
+    
+    /**
+     * Définit le delta depuis un contrôle externe (slider)
+     */
+    public setDeltaSlider(delta: number): void {
+        this.sliderActif = delta !== 0;
+        this.deltaSlider = Math.max(-this.deltaMax, Math.min(this.deltaMax, delta));
+        // Quand le slider change, appliquer immédiatement au deltaLongueur
+        this.deltaLongueur = this.deltaSlider;
+    }
+    
+    /**
+     * Réinitialise le contrôleur (appelé lors d'un reset de simulation)
+     */
+    public reinitialiser(): void {
+        // Réinitialiser tous les états de contrôle
+        this.deltaLongueur = 0;
+        this.deltaSlider = 0;
+        this.sliderActif = false;
+        this.modeEnAttente = undefined;
+        
+        // Désactiver l'autopilote (mais garder le mode sélectionné)
+        if (this.autoPilote) {
+            this.autoPilote.setActif(false);
+        }
+        
+        // Notifier le slider du reset (retour à 0)
+        if (this.onDeltaChange) {
+            this.onDeltaChange(0);
+        }
     }
 }
