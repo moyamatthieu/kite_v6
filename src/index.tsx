@@ -1,13 +1,12 @@
 /**
- * Point d'entrée pour la nouvelle simulation avec architecture propre.
+ * Point d'entrée principal de l'application.
+ * Architecture Clean avec séparation en couches.
  * 
- * @module newIndex
+ * @module index
  */
 
-import './architecture-check';
 import { NewSimulation } from './core/NewSimulation';
 import { DEFAULT_CONFIG } from './core/SimulationConfig';
-import './ui/InterfaceUtilisateur.css';
 
 /**
  * Bootstrap de l'application.
