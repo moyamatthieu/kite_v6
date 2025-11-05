@@ -27,7 +27,14 @@ export class KiteVisualizer {
     private buildVisual(): void {
         const structureMaterial = MaterialFactory.createKiteStructureMaterial();
         const fabricMaterial = MaterialFactory.createKiteFabricMaterial();
-        
+        const pointMaterial = MaterialFactory.createPointMaterial();
+        const bridleMaterial = new THREE.LineBasicMaterial({ 
+            color: 0xff00ff,  // Magenta pour les brides
+            linewidth: 2,
+            opacity: 0.8,
+            transparent: true
+        });
+
         // Barres de structure
         const connections = this.kite.geometry.getConnections();
         connections.forEach(([p1Name, p2Name]) => {
@@ -37,7 +44,7 @@ export class KiteVisualizer {
                 this.addBar(p1, p2, 0.01, structureMaterial);
             }
         });
-        
+
         // Panneaux de toile
         for (let i = 0; i < this.kite.geometry.getPanelCount(); i++) {
             const points = this.kite.geometry.getPanelPoints(i);
@@ -45,6 +52,12 @@ export class KiteVisualizer {
                 this.addPanel(points, fabricMaterial);
             }
         }
+
+        // Brides (lignes des points structurels vers les points de contrôle)
+        this.addBridles(bridleMaterial);
+
+        // Sphères aux points de construction
+        this.addPointSpheres(pointMaterial);
     }
     
     /**
@@ -70,16 +83,69 @@ export class KiteVisualizer {
      */
     private addPanel(points: THREE.Vector3[], material: THREE.Material): void {
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
-        
+
         if (points.length === 3) {
             geometry.setIndex([0, 1, 2]);
         } else if (points.length === 4) {
             geometry.setIndex([0, 2, 3, 0, 1, 2]);
         }
-        
+
         geometry.computeVertexNormals();
         const panel = new THREE.Mesh(geometry, material);
         this.group.add(panel);
+    }
+
+    /**
+     * Ajoute des sphères aux points de construction.
+     */
+    private addPointSpheres(material: THREE.Material): void {
+        const namedPoints = this.kite.geometry.getAllPoints();
+        const sphereRadius = 0.015; // Rayon des sphères (1.5cm)
+
+        namedPoints.forEach(namedPoint => {
+            const geometry = new THREE.SphereGeometry(sphereRadius, 8, 6);
+            const sphere = new THREE.Mesh(geometry, material);
+            sphere.position.copy(namedPoint.position);
+            this.group.add(sphere);
+        });
+    }
+    
+    /**
+     * Ajoute les brides (lignes vers les points de contrôle).
+     */
+    private addBridles(material: THREE.LineBasicMaterial): void {
+        const nez = this.kite.geometry.getPoint('NEZ');
+        const traverseGauche = this.kite.geometry.getPoint('TRAVERSE_GAUCHE');
+        const traverseDroite = this.kite.geometry.getPoint('TRAVERSE_DROITE');
+        const centre = this.kite.geometry.getPoint('CENTRE');
+        const controleGauche = this.kite.geometry.getPoint('CONTROLE_GAUCHE');
+        const controleDroit = this.kite.geometry.getPoint('CONTROLE_DROIT');
+        
+        if (!nez || !traverseGauche || !traverseDroite || !centre || !controleGauche || !controleDroit) {
+            console.warn('Points manquants pour construire les brides');
+            return;
+        }
+        
+        // Brides gauches
+        this.addBridleLine(nez, controleGauche, material);
+        this.addBridleLine(traverseGauche, controleGauche, material);
+        this.addBridleLine(centre, controleGauche, material);
+        
+        // Brides droites
+        this.addBridleLine(nez, controleDroit, material);
+        this.addBridleLine(traverseDroite, controleDroit, material);
+        this.addBridleLine(centre, controleDroit, material);
+    }
+    
+    /**
+     * Ajoute une ligne de bride.
+     */
+    private addBridleLine(p1: THREE.Vector3, p2: THREE.Vector3, material: THREE.LineBasicMaterial): void {
+        const points = [p1, p2];
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geometry, material);
+        line.frustumCulled = false; // Important pour éviter le culling
+        this.group.add(line);
     }
     
     /**

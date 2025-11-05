@@ -15,6 +15,16 @@ export enum LogLevel {
 }
 
 /**
+ * Catégories de log pour le vol du cerf-volant.
+ */
+export enum FlightLogCategory {
+    FLIGHT_STATUS = 'flight_status',
+    SYSTEM_STATUS = 'system_status',
+    PERFORMANCE = 'performance',
+    CONTROL = 'control',
+}
+
+/**
  * Entrée de log structurée.
  */
 export interface LogEntry {
@@ -77,7 +87,28 @@ export class Logger {
     error(message: string, data?: any): void {
         this.log(LogLevel.ERROR, message, data);
     }
-    
+
+    /**
+     * Log le statut de vol (position, altitude, vitesse).
+     */
+    flightStatus(message: string, data?: any): void {
+        this.log(LogLevel.INFO, `[VOL] ${message}`, data);
+    }
+
+    /**
+     * Log les performances (forces, stabilité, efficacité).
+     */
+    performance(message: string, data?: any): void {
+        this.log(LogLevel.INFO, `[PERF] ${message}`, data);
+    }
+
+    /**
+     * Log les actions de contrôle (autopilote, commandes manuelles).
+     */
+    control(message: string, data?: any): void {
+        this.log(LogLevel.INFO, `[CTRL] ${message}`, data);
+    }
+
     private log(level: LogLevel, message: string, data?: any): void {
         const entry: LogEntry = {
             level,

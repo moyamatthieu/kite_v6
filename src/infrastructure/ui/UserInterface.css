@@ -1,0 +1,558 @@
+/**
+ * Styles pour l'interface utilisateur de la simulation.
+ */
+
+/* Variables CSS */
+:root {
+    --primary-color: #00ff88;
+    --secondary-color: #0088ff;
+    --background-dark: rgba(10, 10, 20, 0.95);
+    --background-panel: rgba(20, 20, 35, 0.9);
+    --border-color: rgba(0, 255, 136, 0.3);
+    --text-color: #e0e0e0;
+    --text-bright: #ffffff;
+    --shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* Conteneur principal de l'UI */
+#ui-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 100;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Panneaux */
+.ui-panel {
+    pointer-events: auto;
+    background: var(--background-panel);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    color: var(--text-color);
+    padding: 20px;
+    transition: all 0.3s ease;
+}
+
+.ui-panel:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 4px 25px rgba(0, 255, 136, 0.2);
+}
+
+/* Panneau de contrôle de simulation (haut gauche) */
+#simulation-control-panel {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    width: 300px;
+    background: rgba(20, 20, 30, 0.95);
+    border: 2px solid rgba(0, 255, 136, 0.3);
+    border-radius: 12px;
+    padding: 15px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    z-index: 1000;
+    pointer-events: auto;
+}
+
+/* Panneau de contrôle (gauche) */
+#control-panel {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    width: 320px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+}
+
+/* Slider de contrôle central */
+#control-slider-panel {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(20, 20, 30, 0.95);
+    border: 2px solid rgba(0, 255, 136, 0.3);
+    border-radius: 12px;
+    padding: 20px 40px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    z-index: 1000;
+    min-width: 500px;
+    pointer-events: auto;
+}
+
+/* Panneau autopilote (bas droite) */
+#autopilot-panel {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 250px;
+    max-height: 500px;
+    overflow-y: auto;
+    background: rgba(20, 20, 30, 0.95);
+    border: 2px solid rgba(0, 255, 136, 0.3);
+    border-radius: 12px;
+    padding: 15px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    z-index: 1000;
+    pointer-events: auto;
+}
+
+/* Panneau de log (bas gauche) */
+#log-panel {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    width: 420px;
+    max-height: 300px;
+    background: rgba(20, 20, 30, 0.95);
+    border: 2px solid rgba(0, 255, 136, 0.3);
+    border-radius: 12px;
+    padding: 15px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    z-index: 1000;
+    font-family: 'Courier New', monospace;
+    pointer-events: auto;
+}
+
+/* Titres des panneaux */
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--primary-color);
+}
+
+.panel-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Groupes de contrôles */
+.control-group {
+    margin-bottom: 20px;
+}
+
+.control-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--primary-color);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Sliders */
+.slider-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.slider {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.1);
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+    transition: all 0.2s ease;
+}
+
+.slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 0 15px rgba(0, 255, 136, 0.8);
+}
+
+.slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+    transition: all 0.2s ease;
+}
+
+.slider::-moz-range-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 0 15px rgba(0, 255, 136, 0.8);
+}
+
+.slider-value {
+    min-width: 70px;
+    text-align: right;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+    font-family: 'Courier New', monospace;
+}
+
+/* Boutons */
+.btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: #000;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 255, 136, 0.4);
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-bright);
+    border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: var(--primary-color);
+}
+
+.btn-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 11px;
+}
+
+/* Panneau autopilote */
+.autopilot-modes {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+}
+
+.autopilot-btn {
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-color);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+}
+
+.autopilot-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--primary-color);
+}
+
+.autopilot-btn.active {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: #000;
+    font-weight: 600;
+    border-color: var(--primary-color);
+}
+
+.autopilot-status {
+    margin-top: 12px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+}
+
+/* Panneau de log */
+#log-content {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 6px;
+    padding: 12px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    max-height: 500px;
+}
+
+.log-entry {
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border-left: 2px solid var(--primary-color);
+    border-radius: 3px;
+}
+
+.log-timestamp {
+    color: var(--secondary-color);
+    font-weight: 600;
+}
+
+.log-message {
+    color: var(--text-color);
+}
+
+/* Scrollbars personnalisées */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--primary-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--secondary-color);
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.ui-panel {
+    animation: fadeIn 0.3s ease;
+}
+
+/* Toggle switch */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 24px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 255, 255, 0.1);
+    transition: 0.3s;
+    border-radius: 24px;
+    border: 1px solid var(--border-color);
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.3s;
+    border-radius: 50%;
+}
+
+input:checked + .toggle-slider {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    border-color: var(--primary-color);
+}
+
+input:checked + .toggle-slider:before {
+    transform: translateX(26px);
+}
+
+/* Responsivité */
+@media (max-width: 1200px) {
+    #control-panel,
+    #autopilot-panel {
+        width: 280px;
+    }
+    
+    #log-panel {
+        width: 350px;
+    }
+}
+
+@media (max-width: 768px) {
+    #control-panel,
+    #autopilot-panel,
+    #log-panel {
+        width: calc(100% - 40px);
+        position: relative;
+        margin: 10px 20px;
+    }
+    
+    #ui-container {
+        overflow-y: auto;
+        pointer-events: auto;
+    }
+}
+
+/* Styles spécifiques au slider de contrôle */
+#control-slider {
+    flex: 1; 
+    height: 8px; 
+    -webkit-appearance: none;
+    appearance: none;
+    background: linear-gradient(to right, #ff4444 0%, #666 50%, #4444ff 100%); 
+    border-radius: 4px; 
+    cursor: pointer;
+    outline: none;
+}
+
+#control-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #00ff88;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.6);
+}
+
+#control-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #00ff88;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.6);
+}
+
+/* Styles pour le toggle de l'autopilote */
+#toggle-autopilot {
+    width: 44px;
+    height: 24px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    position: relative;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.3s;
+    border: 1px solid rgba(0, 255, 136, 0.3);
+}
+
+#toggle-autopilot::before {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: white;
+    top: 2px;
+    left: 2px;
+    transition: all 0.3s;
+}
+
+#toggle-autopilot:checked {
+    background: linear-gradient(135deg, #00ff88, #0088ff);
+    border-color: #00ff88;
+}
+
+#toggle-autopilot:checked::before {
+    transform: translateX(20px);
+}
+
+/* Boutons dans les panneaux */
+#btn-pause,
+#btn-reset,
+#btn-copy-log {
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+#btn-pause:hover,
+#btn-reset:hover {
+    transform: translateY(-1px);
+}
+
+#btn-copy-log:hover {
+    background: rgba(0, 255, 136, 0.2) !important;
+}
+
+/* Sliders dans les panneaux */
+#line-length-slider::-webkit-slider-thumb,
+#bridle-nose-slider::-webkit-slider-thumb,
+#bridle-intermediate-slider::-webkit-slider-thumb,
+#bridle-center-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #00ff88;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 6px rgba(0, 255, 136, 0.5);
+}
+
+#line-length-slider::-moz-range-thumb,
+#bridle-nose-slider::-moz-range-thumb,
+#bridle-intermediate-slider::-moz-range-thumb,
+#bridle-center-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #00ff88;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 6px rgba(0, 255, 136, 0.5);
+}

@@ -6,6 +6,7 @@
 
 import { KitePhysicsState } from '../../../../core/types/PhysicsState';
 import { PIDController } from '../PIDController';
+import { Logger } from '../../../logging/Logger';
 import * as THREE from 'three';
 
 /**
@@ -73,19 +74,27 @@ export class ZenithMode implements IAutoPilotMode {
             this.stationY + lineLength,
             0
         );
-        
+
         // Erreurs de position
         const errorX = targetPosition.x - state.position.x;
         const errorY = targetPosition.y - state.position.y;
-        
+
         // Commandes PID
         const commandX = this.pidX.calculate(errorX, state.timestamp);
         const commandY = this.pidY.calculate(errorY, state.timestamp);
-        
+
         // Combiner commandes (priorité à l'altitude)
         const command = commandX * 0.7 + commandY * 0.3;
-        
-        return Math.max(-0.5, Math.min(0.5, command));
+        const clampedCommand = Math.max(-0.5, Math.min(0.5, command));
+
+        // Log détaillé pour debug (toutes les 2 secondes)
+        if (Math.floor(state.timestamp) % 2 === 0 && Math.floor(state.timestamp * 10) % 10 === 0) {
+            console.log(`🎯 ZENITH | Pos:(${state.position.x.toFixed(1)},${state.position.y.toFixed(1)}) ` +
+                       `Err:(${errorX.toFixed(2)},${errorY.toFixed(2)}) ` +
+                       `Cmd:(${commandX.toFixed(3)},${commandY.toFixed(3)})→${clampedCommand.toFixed(3)}`);
+        }
+
+        return clampedCommand;
     }
     
     getInfo(state: KitePhysicsState): string {
@@ -154,5 +163,141 @@ export class ManualMode implements IAutoPilotMode {
     
     reset(): void {
         // Rien à réinitialiser
+    }
+}
+
+/**
+ * Mode ALTITUDE HOLD - Maintient une altitude constante.
+ */
+export class AltitudeHoldMode implements IAutoPilotMode {
+    public readonly name = 'ALTITUDE_HOLD';
+    
+    private pidAltitude: PIDController;
+    private targetAltitude = 10; // m
+    
+    constructor() {
+        this.pidAltitude = new PIDController({
+            Kp: 0.4,
+            Ki: 0.03,
+            Kd: 0.6,
+            integralLimit: 2.0,
+            outputLimit: 0.5,
+        });
+    }
+    
+    calculate(state: KitePhysicsState, deltaTime: number, lineLength: number): number {
+        const errorAltitude = this.targetAltitude - state.position.y;
+        const command = this.pidAltitude.calculate(errorAltitude, state.timestamp);
+        
+        return Math.max(-0.5, Math.min(0.5, command));
+    }
+    
+    getInfo(state: KitePhysicsState): string {
+        const altitude = state.position.y;
+        return `Mode ALTITUDE | Alt: ${altitude.toFixed(2)}m → ${this.targetAltitude}m`;
+    }
+    
+    reset(): void {
+        this.pidAltitude.reset();
+    }
+}
+
+/**
+ * Mode POSITION HOLD - Maintient une position XYZ fixe.
+ */
+export class PositionHoldMode implements IAutoPilotMode {
+    public readonly name = 'POSITION_HOLD';
+    
+    private pidX: PIDController;
+    private pidY: PIDController;
+    private targetPosition = new THREE.Vector3(8, 8, 0);
+    
+    constructor() {
+        this.pidX = new PIDController({
+            Kp: 0.5,
+            Ki: 0.04,
+            Kd: 0.7,
+            integralLimit: 2.0,
+            outputLimit: 0.5,
+        });
+        
+        this.pidY = new PIDController({
+            Kp: 0.3,
+            Ki: 0.02,
+            Kd: 0.5,
+            integralLimit: 2.0,
+            outputLimit: 0.5,
+        });
+    }
+    
+    calculate(state: KitePhysicsState, deltaTime: number, lineLength: number): number {
+        const errorX = this.targetPosition.x - state.position.x;
+        const errorY = this.targetPosition.y - state.position.y;
+        
+        const commandX = this.pidX.calculate(errorX, state.timestamp);
+        const commandY = this.pidY.calculate(errorY, state.timestamp);
+        
+        const command = commandX * 0.6 + commandY * 0.4;
+        
+        return Math.max(-0.5, Math.min(0.5, command));
+    }
+    
+    getInfo(state: KitePhysicsState): string {
+        const dist = state.position.distanceTo(this.targetPosition);
+        return `Mode POSITION | Dist: ${dist.toFixed(2)}m`;
+    }
+    
+    reset(): void {
+        this.pidX.reset();
+        this.pidY.reset();
+    }
+}
+
+/**
+ * Mode CIRCULAR - Vol en trajectoire circulaire.
+ */
+export class CircularTrajectoryMode implements IAutoPilotMode {
+    public readonly name = 'CIRCULAR';
+    
+    private pidRadius: PIDController;
+    private radius = 5; // m
+    private angularVelocity = 0.3; // rad/s
+    private currentAngle = 0;
+    
+    constructor() {
+        this.pidRadius = new PIDController({
+            Kp: 0.6,
+            Ki: 0.05,
+            Kd: 0.8,
+            integralLimit: 2.0,
+            outputLimit: 0.5,
+        });
+    }
+    
+    calculate(state: KitePhysicsState, deltaTime: number, lineLength: number): number {
+        // Mettre à jour l'angle
+        this.currentAngle += this.angularVelocity * deltaTime;
+        
+        // Position cible sur le cercle
+        const targetX = Math.cos(this.currentAngle) * this.radius;
+        const targetZ = Math.sin(this.currentAngle) * this.radius;
+        
+        // Calculer l'erreur radiale
+        const currentRadius = Math.sqrt(state.position.x * state.position.x + state.position.z * state.position.z);
+        const errorRadius = this.radius - currentRadius;
+        
+        const command = this.pidRadius.calculate(errorRadius, state.timestamp);
+        
+        return Math.max(-0.5, Math.min(0.5, command));
+    }
+    
+    getInfo(state: KitePhysicsState): string {
+        const currentRadius = Math.sqrt(state.position.x * state.position.x + state.position.z * state.position.z);
+        return `Mode CIRCULAIRE | R: ${currentRadius.toFixed(2)}m → ${this.radius}m`;
+    }
+    
+    reset(): void {
+        this.pidRadius.reset();
+        this.currentAngle = 0;
     }
 }

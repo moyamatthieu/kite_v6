@@ -1,0 +1,886 @@
+/**
+ * Interface utilisateur refaite - Logs gauche, Slider centre, Autopilote droite.
+ *
+ * @module infrastructure/ui/UserInterface
+ */
+
+import './UserInterface.css';
+import { SimulationEventType, EventBus } from '../../core/types/Events';
+import { Logger, LogEntry, LogLevel } from '../../application/logging/Logger';
+
+export interface UICallbacks {
+    onReset?: () => void;
+    onPause?: () => void;
+    onWindChange?: (speed: number) => void;
+    onLineLengthChange?: (length: number) => void;
+    onBridleChange?: (type: 'nose' | 'intermediate' | 'center', value: number) => void;
+    onAutoPilotToggle?: (enabled: boolean) => void;
+    onAutoPilotModeChange?: (mode: string) => void;
+    onControlDeltaChange?: (delta: number) => void;
+    onSimulationPause?: (paused: boolean) => void;
+    onGeometryDebugToggle?: () => void;
+    onForceVectorsToggle?: () => void;
+}
+
+/**
+ * Gestionnaire de l'interface utilisateur.
+ */
+export class UserInterface {
+    private container: HTMLElement;
+    private eventBus: EventBus;
+    private callbacks: UICallbacks = {};
+    
+    private logPanel!: HTMLElement;
+    private logContent!: HTMLElement;
+    private autoPilotPanel!: HTMLElement;
+    private controlSlider!: HTMLInputElement;
+    private controlSliderValue!: HTMLElement;
+    
+    private logEntries: string[] = [];
+    private maxLogEntries = 50;
+    
+    constructor(eventBus: EventBus, parent: HTMLElement, callbacks?: UICallbacks) {
+        this.eventBus = eventBus;
+        this.callbacks = callbacks || {};
+        
+        // Créer conteneur principal
+        this.container = document.createElement('div');
+        this.container.id = 'ui-container';
+        parent.appendChild(this.container);
+        
+        this.createPanels();
+        this.setupEventListeners();
+        this.subscribeToSimulationEvents();
+    }
+    
+    /**
+     * Crée tous les panneaux de l'interface.
+     */
+    private createPanels(): void {
+        this.createSimulationControlPanel();
+        this.createLogPanel();
+        this.createControlSlider();
+        this.createAutoPilotPanel();
+    }
+
+    /**
+     * Crée le panneau de contrôle de simulation (en haut à gauche).
+     */
+    private createSimulationControlPanel(): void {
+        const controlPanel = document.createElement('div');
+        controlPanel.id = 'simulation-control-panel';
+
+        controlPanel.innerHTML = `
+            <div style="margin-bottom: 15px; border-bottom: 1px solid rgba(0, 255, 136, 0.2); padding-bottom: 10px;">
+                <div style="font-size: 14px; font-weight: 600; color: #00ff88; text-align: center;">
+                    🎛️ CONTRÔLE SIMULATION
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                <button id="btn-pause" style="
+                    flex: 1;
+                    background: rgba(255, 165, 0, 0.1);
+                    border: 1px solid rgba(255, 165, 0, 0.3);
+                    color: #ffa500;
+                    padding: 10px;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                ">⏸️ PAUSE</button>
+
+                <button id="btn-reset" style="
+                    flex: 1;
+                    background: rgba(255, 68, 68, 0.1);
+                    border: 1px solid rgba(255, 68, 68, 0.3);
+                    color: #ff4444;
+                    padding: 10px;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                ">🔄 RESET</button>
+            </div>
+            
+            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                <button id="btn-geometry" style="
+                    flex: 1;
+                    background: rgba(68, 136, 255, 0.1);
+                    border: 1px solid rgba(68, 136, 255, 0.3);
+                    color: #4488ff;
+                    padding: 10px;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                ">🔍 GÉOMÉTRIE</button>
+                
+                <button id="btn-forces" style="
+                    flex: 1;
+                    background: rgba(255, 215, 0, 0.1);
+                    border: 1px solid rgba(255, 215, 0, 0.3);
+                    color: #ffd700;
+                    padding: 10px;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                ">⚡ FORCES</button>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <div style="font-size: 12px; color: #00ff88; font-weight: 600; margin-bottom: 8px;">
+                    � Vent: <span id="wind-speed-value" style="color: #fff;">3.0 m/s</span> <span style="color: #aaa; font-size: 10px;">(~2.5 Beaufort)</span>
+                </div>
+                <input type="range"
+                       id="wind-speed-slider"
+                       min="0"
+                       max="15"
+                       value="3"
+                       step="0.1"
+                       style="
+                           width: 100%;
+                           height: 6px;
+                           -webkit-appearance: none;
+                           appearance: none;
+                           background: linear-gradient(to right, #666 0%, #00ff88 50%, #666 100%);
+                           border-radius: 3px;
+                           cursor: pointer;
+                           outline: none;
+                       ">
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <div style="font-size: 12px; color: #00ff88; font-weight: 600; margin-bottom: 8px;">
+                    �📏 Longueur des lignes: <span id="line-length-value" style="color: #fff;">15.0 m</span>
+                </div>
+                <input type="range"
+                       id="line-length-slider"
+                       min="0"
+                       max="50"
+                       value="15"
+                       step="0.5"
+                       style="
+                           width: 100%;
+                           height: 6px;
+                           -webkit-appearance: none;
+                           appearance: none;
+                           background: linear-gradient(to right, #666 0%, #00ff88 50%, #666 100%);
+                           border-radius: 3px;
+                           cursor: pointer;
+                           outline: none;
+                       ">
+            </div>
+
+            <div style="margin-bottom: 10px;">
+                <div style="font-size: 12px; color: #00ff88; font-weight: 600; margin-bottom: 8px;">
+                    🎯 Brides (0.2 - 0.8)
+                </div>
+            </div>
+
+            <div style="margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                    <span style="font-size: 11px; color: #aaa;">Nez:</span>
+                    <span id="bridle-nose-value" style="font-size: 11px; color: #00ff88; font-weight: 600;">0.65</span>
+                </div>
+                <input type="range"
+                       id="bridle-nose-slider"
+                       min="0.2"
+                       max="0.8"
+                       value="0.65"
+                       step="0.01"
+                       style="
+                           width: 100%;
+                           height: 6px;
+                           -webkit-appearance: none;
+                           appearance: none;
+                           background: linear-gradient(to right, #666 0%, #00ff88 50%, #666 100%);
+                           border-radius: 3px;
+                           cursor: pointer;
+                           outline: none;
+                       ">
+            </div>
+
+            <div style="margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                    <span style="font-size: 11px; color: #aaa;">Intermédiaire:</span>
+                    <span id="bridle-intermediate-value" style="font-size: 11px; color: #00ff88; font-weight: 600;">0.65</span>
+                </div>
+                <input type="range"
+                       id="bridle-intermediate-slider"
+                       min="0.2"
+                       max="0.8"
+                       value="0.65"
+                       step="0.01"
+                       style="
+                           width: 100%;
+                           height: 6px;
+                           -webkit-appearance: none;
+                           appearance: none;
+                           background: linear-gradient(to right, #666 0%, #00ff88 50%, #666 100%);
+                           border-radius: 3px;
+                           cursor: pointer;
+                           outline: none;
+                       ">
+            </div>
+
+            <div style="margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                    <span style="font-size: 11px; color: #aaa;">Centre:</span>
+                    <span id="bridle-center-value" style="font-size: 11px; color: #00ff88; font-weight: 600;">0.65</span>
+                </div>
+                <input type="range"
+                       id="bridle-center-slider"
+                       min="0.2"
+                       max="0.8"
+                       value="0.65"
+                       step="0.01"
+                       style="
+                           width: 100%;
+                           height: 6px;
+                           -webkit-appearance: none;
+                           appearance: none;
+                           background: linear-gradient(to right, #666 0%, #00ff88 50%, #666 100%);
+                           border-radius: 3px;
+                           cursor: pointer;
+                           outline: none;
+                       ">
+            </div>
+        `;
+
+        this.container.appendChild(controlPanel);
+
+        // Ajouter les styles pour les sliders
+        const style = document.createElement('style');
+        style.textContent += `
+            #wind-speed-slider::-webkit-slider-thumb,
+            #line-length-slider::-webkit-slider-thumb,
+            #bridle-nose-slider::-webkit-slider-thumb,
+            #bridle-intermediate-slider::-webkit-slider-thumb,
+            #bridle-center-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: #00ff88;
+                cursor: pointer;
+                box-shadow: 0 0 6px rgba(0, 255, 136, 0.5);
+            }
+            #wind-speed-slider::-moz-range-thumb,
+            #line-length-slider::-moz-range-thumb,
+            #bridle-nose-slider::-moz-range-thumb,
+            #bridle-intermediate-slider::-moz-range-thumb,
+            #bridle-center-slider::-moz-range-thumb {
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: #00ff88;
+                cursor: pointer;
+                border: none;
+                box-shadow: 0 0 6px rgba(0, 255, 136, 0.5);
+            }
+            #btn-pause:hover {
+                background: rgba(255, 165, 0, 0.2) !important;
+                transform: translateY(-1px);
+            }
+            #btn-reset:hover {
+                background: rgba(255, 68, 68, 0.2) !important;
+                transform: translateY(-1px);
+            }
+            #btn-geometry:hover {
+                background: rgba(68, 136, 255, 0.2) !important;
+                transform: translateY(-1px);
+            }
+            #btn-forces:hover {
+                background: rgba(255, 215, 0, 0.2) !important;
+                transform: translateY(-1px);
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    /**
+     * Crée le panneau de log (en bas à droite).
+     */
+    private createLogPanel(): void {
+        this.logPanel = document.createElement('div');
+        this.logPanel.id = 'log-panel';
+        
+        this.logPanel.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid rgba(0, 255, 136, 0.2); padding-bottom: 8px;">
+                <div style="font-size: 14px; font-weight: 600; color: #00ff88;">
+                    📝 JOURNAL
+                </div>
+                <button id="btn-copy-log" style="
+                    background: rgba(0, 255, 136, 0.1);
+                    border: 1px solid rgba(0, 255, 136, 0.3);
+                    color: #00ff88;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                ">📋 Copier</button>
+            </div>
+            <div id="log-content" style="
+                max-height: 230px;
+                overflow-y: auto;
+                font-size: 13px;
+                line-height: 1.6;
+            "></div>
+        `;
+        
+        this.logContent = this.logPanel.querySelector('#log-content')!;
+        this.container.appendChild(this.logPanel);
+        
+        // Messages initiaux
+        this.addLog('✅ Interface initialisée', 'info');
+        this.addLog('🚀 Simulation prête', 'success');
+    }
+    
+    /**
+     * Crée le slider de contrôle central.
+     */
+    private createControlSlider(): void {
+        const sliderPanel = document.createElement('div');
+        sliderPanel.id = 'control-slider-panel';
+        
+        sliderPanel.innerHTML = `
+            <div style="text-align: center; margin-bottom: 15px;">
+                <div style="font-size: 14px; font-weight: 600; color: #00ff88; margin-bottom: 8px;">
+                    🎮 CONTRÔLE DU CERF-VOLANT
+                </div>
+                <div style="font-size: 11px; color: #aaa;">
+                    Gauche ← → Droite | Delta: <span id="control-delta-value" style="color: #00ff88; font-weight: 600;">0.00 m</span>
+                </div>
+            </div>
+            
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <div style="font-size: 12px; color: #ff4444; font-weight: 600; min-width: 50px; text-align: right;">
+                    ◀ GAUCHE
+                </div>
+                
+                <input type="range" 
+                       id="control-slider" 
+                       min="-0.6" 
+                       max="0.6" 
+                       value="0" 
+                       step="0.01"
+                       style="
+                           flex: 1; 
+                           height: 8px; 
+                           -webkit-appearance: none;
+                           appearance: none;
+                           background: linear-gradient(to right, #ff4444 0%, #666 50%, #4444ff 100%); 
+                           border-radius: 4px; 
+                           cursor: pointer;
+                           outline: none;
+                       ">
+                
+                <div style="font-size: 12px; color: #4444ff; font-weight: 600; min-width: 50px;">
+                    DROITE ▶
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 10px; font-size: 10px; color: #666;">
+                ⌨️ Flèches ← → ou slider pour contrôler | ESPACE = Pause | R = Reset
+            </div>
+        `;
+        
+        this.container.appendChild(sliderPanel);
+        
+        this.controlSlider = document.getElementById('control-slider') as HTMLInputElement;
+        this.controlSliderValue = document.getElementById('control-delta-value')!;
+        
+        // Événement de changement
+        this.controlSlider.addEventListener('input', () => {
+            const delta = parseFloat(this.controlSlider.value);
+            this.controlSliderValue.textContent = delta.toFixed(2) + ' m';
+            this.callbacks.onControlDeltaChange?.(delta);
+        });
+    }
+    
+    /**
+     * Crée le panneau d'autopilote (à droite).
+     */
+    private createAutoPilotPanel(): void {
+        this.autoPilotPanel = document.createElement('div');
+        this.autoPilotPanel.id = 'autopilot-panel';
+        
+        this.autoPilotPanel.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid rgba(0, 255, 136, 0.2); padding-bottom: 10px;">
+                <div style="font-size: 14px; font-weight: 600; color: #00ff88;">
+                    🤖 AUTOPILOTE
+                </div>
+                <label style="display: inline-flex; cursor: pointer;">
+                    <input type="checkbox" id="toggle-autopilot" style="
+                        width: 44px;
+                        height: 24px;
+                        -webkit-appearance: none;
+                        appearance: none;
+                        background: rgba(255, 255, 255, 0.1);
+                        border-radius: 12px;
+                        position: relative;
+                        cursor: pointer;
+                        outline: none;
+                        transition: all 0.3s;
+                    ">
+                </label>
+            </div>
+            
+            <div id="autopilot-modes" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px;">
+                <button class="autopilot-btn" data-mode="manual" style="
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    color: #aaa;
+                    padding: 12px 8px;
+                    border-radius: 8px;
+                    font-size: 11px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    text-align: center;
+                ">
+                    <div style="font-size: 16px; margin-bottom: 4px;">✋</div>
+                    <div>Manuel</div>
+                </button>
+                <button class="autopilot-btn" data-mode="stabilization">
+                    <div style="font-size: 16px; margin-bottom: 4px;">⚖️</div>
+                    <div>Stabilisation</div>
+                </button>
+                <button class="autopilot-btn" data-mode="altitude">
+                    <div style="font-size: 16px; margin-bottom: 4px;">📈</div>
+                    <div>Altitude</div>
+                </button>
+                <button class="autopilot-btn" data-mode="position">
+                    <div style="font-size: 16px; margin-bottom: 4px;">📍</div>
+                    <div>Position</div>
+                </button>
+                <button class="autopilot-btn active" data-mode="zenith">
+                    <div style="font-size: 16px; margin-bottom: 4px;">⬆️</div>
+                    <div>Zénith</div>
+                </button>
+                <button class="autopilot-btn" data-mode="circular">
+                    <div style="font-size: 16px; margin-bottom: 4px;">🔄</div>
+                    <div>Circulaire</div>
+                </button>
+            </div>
+            
+            <div id="autopilot-status" style="
+                background: rgba(0, 255, 136, 0.05);
+                border: 1px solid rgba(0, 255, 136, 0.2);
+                border-radius: 8px;
+                padding: 12px;
+                font-size: 11px;
+            ">
+                <div style="color: #00ff88; font-weight: 600; margin-bottom: 4px;">Mode: Zénith</div>
+                <div style="font-size: 10px; color: #aaa;">Maintien au point le plus haut</div>
+            </div>
+            
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+                <div style="font-size: 11px; color: #aaa; line-height: 1.6;">
+                    <div><strong style="color: #00ff88;">P</strong> : Toggle Autopilote</div>
+                    <div><strong style="color: #00ff88;">1-6</strong> : Changer mode</div>
+                </div>
+            </div>
+        `;
+        
+        this.container.appendChild(this.autoPilotPanel);
+        
+        // Style les boutons autopilote
+        const style = document.createElement('style');
+        style.textContent = `
+            .autopilot-btn {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                color: #aaa;
+                padding: 12px 8px;
+                border-radius: 8px;
+                font-size: 11px;
+                cursor: pointer;
+                transition: all 0.2s;
+                text-align: center;
+            }
+            .autopilot-btn:hover {
+                background: rgba(0, 255, 136, 0.1);
+                border-color: rgba(0, 255, 136, 0.3);
+                color: #00ff88;
+            }
+            .autopilot-btn.active {
+                background: rgba(0, 255, 136, 0.2);
+                border-color: rgba(0, 255, 136, 0.5);
+                color: #00ff88;
+                font-weight: 600;
+            }
+            #control-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background: #00ff88;
+                cursor: pointer;
+                box-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
+            }
+            #control-slider::-moz-range-thumb {
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background: #00ff88;
+                cursor: pointer;
+                border: none;
+                box-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
+            }
+            #toggle-autopilot:checked {
+                background: #00ff88 !important;
+            }
+            #toggle-autopilot:checked::before {
+                transform: translateX(20px);
+            }
+            #toggle-autopilot::before {
+                content: '';
+                position: absolute;
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                top: 2px;
+                left: 2px;
+                background: white;
+                transition: transform 0.3s;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    /**
+     * Configure les écouteurs d'événements.
+     */
+    private setupEventListeners(): void {
+        // Boutons pause et reset
+        const pauseBtn = document.getElementById('btn-pause');
+        const resetBtn = document.getElementById('btn-reset');
+        const geometryBtn = document.getElementById('btn-geometry');
+        const forcesBtn = document.getElementById('btn-forces');
+
+        pauseBtn?.addEventListener('click', () => {
+            this.callbacks.onSimulationPause?.(true);
+            this.addLog('⏸️ Simulation mise en pause', 'warning');
+            this.updatePauseButton(true);
+        });
+
+        resetBtn?.addEventListener('click', () => {
+            this.callbacks.onReset?.();
+            this.addLog('🔄 Simulation réinitialisée', 'info');
+            this.updatePauseButton(false);
+        });
+        
+        geometryBtn?.addEventListener('click', () => {
+            this.callbacks.onGeometryDebugToggle?.();
+            this.addLog('🔍 Mode géométrie basculé', 'info');
+        });
+        
+        forcesBtn?.addEventListener('click', () => {
+            this.callbacks.onForceVectorsToggle?.();
+            this.addLog('⚡ Vecteurs de forces basculés', 'info');
+        });
+
+        // Slider vitesse du vent
+        const windSpeedSlider = document.getElementById('wind-speed-slider') as HTMLInputElement;
+        const windSpeedValue = document.getElementById('wind-speed-value');
+
+        windSpeedSlider?.addEventListener('input', () => {
+            const speed = parseFloat(windSpeedSlider.value);
+            const beaufort = this.getBeaufortScale(speed);
+            windSpeedValue!.textContent = `${speed.toFixed(1)} m/s`;
+            
+            // Mettre à jour l'affichage Beaufort
+            const beaufortDisplay = windSpeedValue?.parentElement?.querySelector('span:last-child');
+            if (beaufortDisplay) {
+                beaufortDisplay.textContent = `(~${beaufort.toFixed(1)} Beaufort)`;
+            }
+            
+            this.callbacks.onWindChange?.(speed);
+            this.addLog(`💨 Vent: ${speed.toFixed(1)} m/s (~${beaufort.toFixed(1)} Beaufort)`, 'info');
+        });
+
+        // Slider longueur des lignes
+        const lineLengthSlider = document.getElementById('line-length-slider') as HTMLInputElement;
+        const lineLengthValue = document.getElementById('line-length-value');
+
+        lineLengthSlider?.addEventListener('input', () => {
+            const length = parseFloat(lineLengthSlider.value);
+            lineLengthValue!.textContent = length.toFixed(1) + ' m';
+            this.callbacks.onLineLengthChange?.(length);
+            this.addLog(`📏 Longueur des lignes: ${length.toFixed(1)} m`, 'info');
+        });
+
+        // Sliders des brides
+        const bridleSliders = [
+            { id: 'bridle-nose-slider', type: 'nose' as const, valueId: 'bridle-nose-value' },
+            { id: 'bridle-intermediate-slider', type: 'intermediate' as const, valueId: 'bridle-intermediate-value' },
+            { id: 'bridle-center-slider', type: 'center' as const, valueId: 'bridle-center-value' }
+        ];
+
+        bridleSliders.forEach(({ id, type, valueId }) => {
+            const slider = document.getElementById(id) as HTMLInputElement;
+            const valueSpan = document.getElementById(valueId);
+
+            slider?.addEventListener('input', () => {
+                const value = parseFloat(slider.value);
+                valueSpan!.textContent = value.toFixed(2);
+                this.callbacks.onBridleChange?.(type, value);
+                this.addLog(`🎯 Bride ${type}: ${value.toFixed(2)}`, 'info');
+            });
+        });
+
+        // Copier log
+        const copyBtn = document.getElementById('btn-copy-log');
+        copyBtn?.addEventListener('click', () => this.copyLog());
+
+        // Toggle autopilote
+        const toggleAutopilot = document.getElementById('toggle-autopilot') as HTMLInputElement;
+        toggleAutopilot?.addEventListener('change', (e) => {
+            const enabled = (e.target as HTMLInputElement).checked;
+            this.callbacks.onAutoPilotToggle?.(enabled);
+            this.addLog(`🤖 Autopilote ${enabled ? 'activé' : 'désactivé'}`, 'info');
+        });
+
+        // Modes autopilote
+        const modeButtons = document.querySelectorAll('.autopilot-btn');
+        modeButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mode = btn.getAttribute('data-mode') || 'zenith';
+                modeButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.callbacks.onAutoPilotModeChange?.(mode);
+                this.updateAutopilotStatus(mode);
+            });
+        });
+    }
+    
+    /**
+     * S'abonne aux événements de simulation.
+     */
+    private subscribeToSimulationEvents(): void {
+        // On pourrait afficher des stats en temps réel ici si besoin
+    }
+    
+    /**
+     * Ajoute un helper pour les clicks.
+     */
+    private addClickListener(id: string, callback: () => void): void {
+        const element = document.getElementById(id);
+        element?.addEventListener('click', callback);
+    }
+    
+    /**
+     * Ajoute une entrée au log.
+     */
+    public addLog(message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info'): void {
+        const colors = {
+            info: '#00aaff',
+            success: '#00ff88',
+            warning: '#ffaa00',
+            error: '#ff4444',
+        };
+        
+        const timestamp = new Date().toLocaleTimeString('fr-FR');
+        const entry = `
+            <div style="color: ${colors[type]}; margin-bottom: 4px;">
+                <span style="color: #666;">[${timestamp}]</span> ${message}
+            </div>
+        `;
+        
+        this.logEntries.push(entry);
+        if (this.logEntries.length > this.maxLogEntries) {
+            this.logEntries.shift();
+        }
+        
+        this.logContent.innerHTML = this.logEntries.join('');
+        this.logContent.scrollTop = this.logContent.scrollHeight;
+    }
+    
+    /**
+     * Copie le log dans le presse-papiers.
+     */
+    private async copyLog(): Promise<void> {
+        const logText = this.logEntries
+            .map(entry => {
+                const div = document.createElement('div');
+                div.innerHTML = entry;
+                return div.textContent || '';
+            })
+            .join('\n');
+        
+        try {
+            await navigator.clipboard.writeText(logText);
+            this.addLog('📋 Log copié dans le presse-papiers', 'success');
+        } catch (err) {
+            this.addLog('❌ Erreur lors de la copie', 'error');
+        }
+    }
+    
+    /**
+     * Met à jour le statut de l'autopilote.
+     */
+    private updateAutopilotStatus(mode: string): void {
+        const statusDiv = document.getElementById('autopilot-status');
+        const descriptions: Record<string, { title: string; desc: string }> = {
+            manual: { title: 'Manuel', desc: 'Contrôle total par l\'utilisateur' },
+            stabilization: { title: 'Stabilisation', desc: 'Maintien de l\'orientation' },
+            altitude: { title: 'Altitude', desc: 'Vol à altitude constante' },
+            position: { title: 'Position', desc: 'Stabilisation XYZ' },
+            zenith: { title: 'Zénith', desc: 'Maintien au point le plus haut' },
+            circular: { title: 'Circulaire', desc: 'Vol en cercle' },
+        };
+        
+        const info = descriptions[mode] || descriptions.manual;
+        
+        if (statusDiv) {
+            statusDiv.innerHTML = `
+                <div style="color: #00ff88; font-weight: 600; margin-bottom: 4px;">Mode: ${info.title}</div>
+                <div style="font-size: 10px; color: #aaa;">${info.desc}</div>
+            `;
+        }
+        
+        this.addLog(`🎯 Mode: ${info.title}`, 'info');
+    }
+    
+    /**
+     * Met à jour la position du slider (pour autopilote).
+     */
+    public updateControlSlider(delta: number): void {
+        if (this.controlSlider) {
+            this.controlSlider.value = delta.toString();
+            this.controlSliderValue.textContent = delta.toFixed(2) + ' m';
+        }
+    }
+
+    /**
+     * Met à jour l'apparence du bouton pause.
+     */
+    private updatePauseButton(paused: boolean): void {
+        const pauseBtn = document.getElementById('btn-pause') as HTMLButtonElement;
+        if (pauseBtn) {
+            if (paused) {
+                pauseBtn.textContent = '▶️ REPRENDRE';
+                pauseBtn.style.background = 'rgba(0, 255, 136, 0.1)';
+                pauseBtn.style.borderColor = 'rgba(0, 255, 136, 0.3)';
+                pauseBtn.style.color = '#00ff88';
+            } else {
+                pauseBtn.textContent = '⏸️ PAUSE';
+                pauseBtn.style.background = 'rgba(255, 165, 0, 0.1)';
+                pauseBtn.style.borderColor = 'rgba(255, 165, 0, 0.3)';
+                pauseBtn.style.color = '#ffa500';
+            }
+        }
+    }
+
+    /**
+     * Connecte le Logger à l'interface utilisateur pour afficher les logs structurés.
+     */
+    public connectLogger(logger: Logger): () => void {
+        const unsubscribe = logger.subscribe((entry: LogEntry) => {
+            this.addStructuredLog(entry);
+        });
+        return unsubscribe;
+    }
+
+    /**
+     * Ajoute un log structuré depuis le Logger.
+     */
+    private addStructuredLog(entry: LogEntry): void {
+        const colors = {
+            [LogLevel.DEBUG]: '#888888',
+            [LogLevel.INFO]: '#00aaff',
+            [LogLevel.WARNING]: '#ffaa00',
+            [LogLevel.ERROR]: '#ff4444',
+        };
+
+        const timestamp = new Date(entry.timestamp).toLocaleTimeString('fr-FR');
+        const levelEmoji = {
+            [LogLevel.DEBUG]: '🔍',
+            [LogLevel.INFO]: 'ℹ️',
+            [LogLevel.WARNING]: '⚠️',
+            [LogLevel.ERROR]: '❌',
+        };
+
+        let message = entry.message;
+        let type: 'info' | 'success' | 'warning' | 'error' = 'info';
+
+        // Déterminer le type basé sur le niveau
+        switch (entry.level) {
+            case LogLevel.DEBUG:
+                type = 'info';
+                break;
+            case LogLevel.INFO:
+                type = 'info';
+                break;
+            case LogLevel.WARNING:
+                type = 'warning';
+                break;
+            case LogLevel.ERROR:
+                type = 'error';
+                break;
+        }
+
+        // Formater le message avec les données si présentes
+        if (entry.data) {
+            if (typeof entry.data === 'object') {
+                const dataStr = Object.entries(entry.data)
+                    .map(([key, value]) => `${key}:${value}`)
+                    .join(' ');
+                message += ` | ${dataStr}`;
+            } else {
+                message += ` | ${entry.data}`;
+            }
+        }
+
+        const entryHtml = `
+            <div style="color: ${colors[entry.level]}; margin-bottom: 4px; font-size: 10px;">
+                <span style="color: #666;">[${timestamp}]</span>
+                <span style="color: ${colors[entry.level]}; margin-right: 4px;">${levelEmoji[entry.level]}</span>
+                ${message}
+            </div>
+        `;
+
+        this.logEntries.push(entryHtml);
+        if (this.logEntries.length > this.maxLogEntries) {
+            this.logEntries.shift();
+        }
+
+        this.logContent.innerHTML = this.logEntries.join('');
+        this.logContent.scrollTop = this.logContent.scrollHeight;
+    }
+    
+    /**
+     * Convertit une vitesse de vent (m/s) en échelle Beaufort.
+     */
+    private getBeaufortScale(speedMs: number): number {
+        if (speedMs < 0.5) return 0;
+        if (speedMs < 1.6) return 1;
+        if (speedMs < 3.4) return 2;
+        if (speedMs < 5.5) return 3;
+        if (speedMs < 8.0) return 4;
+        if (speedMs < 10.8) return 5;
+        if (speedMs < 13.9) return 6;
+        if (speedMs < 17.2) return 7;
+        if (speedMs < 20.8) return 8;
+        if (speedMs < 24.5) return 9;
+        if (speedMs < 28.5) return 10;
+        if (speedMs < 32.7) return 11;
+        return 12;
+    }
+
+    /**
+     * Nettoie l'interface.
+     */
+    public dispose(): void {
+        this.container.remove();
+    }
+}

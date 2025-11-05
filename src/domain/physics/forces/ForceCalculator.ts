@@ -80,6 +80,12 @@ export interface LineForceResult {
     /** Couple généré par l'asymétrie (N·m) */
     torque: Vector3D;
     
+    /** Force ligne gauche (N) */
+    leftForce: Vector3D;
+    
+    /** Force ligne droite (N) */
+    rightForce: Vector3D;
+    
     /** Tension ligne gauche (N) */
     leftTension: number;
     
