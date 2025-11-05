@@ -74,6 +74,22 @@ export class MaterialFactory {
         }
         return this.cache.get(key) as THREE.LineBasicMaterial;
     }
+
+    /**
+     * Matériau pour les points de construction (sphères).
+     */
+    static createPointMaterial(): THREE.MeshStandardMaterial {
+        const key = 'point';
+        if (!this.cache.has(key)) {
+            this.cache.set(key, new THREE.MeshStandardMaterial({
+                color: 0xffff00, // Jaune pour visibilité
+                emissive: 0x444400, // Légère émission pour plus de visibilité
+                metalness: 0.3,
+                roughness: 0.4,
+            }));
+        }
+        return this.cache.get(key) as THREE.MeshStandardMaterial;
+    }
     
     /**
      * Nettoie tous les matériaux cachés.

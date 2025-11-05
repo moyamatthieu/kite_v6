@@ -55,6 +55,12 @@ export interface Forces {
     /** Force des lignes (N) */
     lines: Vector3D;
     
+    /** Force ligne gauche (N) */
+    linesLeft?: Vector3D;
+    
+    /** Force ligne droite (N) */
+    linesRight?: Vector3D;
+    
     /** Force totale résultante (N) */
     total: Vector3D;
     

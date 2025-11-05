@@ -13,20 +13,26 @@ import { Kite } from '../../kite/Kite';
  * Configuration du système de lignes.
  */
 export interface LineForceConfig {
-    /** Raideur du ressort (N/m) */
+    /** Raideur du ressort linéaire (N/m) - Zone proche */
     stiffness: number;
-    
+
     /** Amortissement (Ns/m) */
     damping: number;
-    
-    /** Ratio longueur de repos (fraction de la longueur totale) */
-    restLengthRatio: number;
-    
+
     /** Coefficient de lissage temporel (0-1) */
     smoothingCoefficient: number;
-    
+
     /** Tension minimale en régime 1 (N) */
     minTension: number;
+
+    /** 🔧 NOUVEAU : Seuil d'activation de la zone exponentielle (m) */
+    exponentialThreshold: number;
+
+    /** 🔧 NOUVEAU : Coefficient d'intensité exponentielle (N) */
+    exponentialStiffness: number;
+
+    /** 🔧 NOUVEAU : Taux de croissance exponentiel (1/m) */
+    exponentialRate: number;
 }
 
 /**
@@ -48,8 +54,9 @@ export class LineForceCalculator implements ILineForceCalculator {
     private winchPositions: WinchPositions;
     
     // Tensions lissées pour éviter oscillations
-    private smoothedLeftTension = 0;
-    private smoothedRightTension = 0;
+    // ✅ CORRECTION: Initialisation avec minTension pour éviter choc initial
+    private smoothedLeftTension: number;
+    private smoothedRightTension: number;
     
     constructor(
         kite: Kite,
@@ -59,12 +66,19 @@ export class LineForceCalculator implements ILineForceCalculator {
         this.kite = kite;
         this.winchPositions = winchPositions;
         this.config = {
-            stiffness: config?.stiffness ?? 10,
+            stiffness: config?.stiffness ?? 20,  // Augmenté de 10 → 20 pour zone linéaire
             damping: config?.damping ?? 10,
-            restLengthRatio: config?.restLengthRatio ?? 0.99,
-            smoothingCoefficient: config?.smoothingCoefficient ?? 0.45,
-            minTension: config?.minTension ?? 0.008,
+            smoothingCoefficient: config?.smoothingCoefficient ?? 0.2,
+            minTension: config?.minTension ?? 1.5,
+            // 🔧 NOUVEAUX paramètres pour protection exponentielle
+            exponentialThreshold: config?.exponentialThreshold ?? 1.0,  // Activation à 1m d'extension
+            exponentialStiffness: config?.exponentialStiffness ?? 50,   // Force exponentielle
+            exponentialRate: config?.exponentialRate ?? 1.5,            // Croissance rapide
         };
+        
+        // ✅ CORRECTION: Initialiser les tensions lissées avec minTension
+        this.smoothedLeftTension = this.config.minTension;
+        this.smoothedRightTension = this.config.minTension;
     }
     
     /**
@@ -85,15 +99,15 @@ export class LineForceCalculator implements ILineForceCalculator {
         const rightLength = baseLength + delta;
         
         // Points d'attache sur le cerf-volant (points de contrôle des brides)
-        const leftAttach = this.kite.getGlobalPointPosition('LEFT_CONTROL') ?? state.position.clone();
-        const rightAttach = this.kite.getGlobalPointPosition('RIGHT_CONTROL') ?? state.position.clone();
+    const leftAttach = this.resolveAttachPoint(['CONTROLE_GAUCHE', 'LEFT_CONTROL'], state.position);
+    const rightAttach = this.resolveAttachPoint(['CONTROLE_DROIT', 'RIGHT_CONTROL'], state.position);
         
         // Calculer forces individuelles
         const leftForceData = this.calculateSingleLineForce(
             this.winchPositions.left,
             leftAttach,
             leftLength,
-            state.velocity,
+            state,
             true
         );
         
@@ -101,7 +115,7 @@ export class LineForceCalculator implements ILineForceCalculator {
             this.winchPositions.right,
             rightAttach,
             rightLength,
-            state.velocity,
+            state,
             false
         );
         
@@ -120,6 +134,8 @@ export class LineForceCalculator implements ILineForceCalculator {
         return {
             force: totalForce,
             torque: totalTorque,
+            leftForce: leftForceData.force,
+            rightForce: rightForceData.force,
             leftTension: leftForceData.tension,
             rightTension: rightForceData.tension,
             leftDistance: leftForceData.distance,
@@ -134,7 +150,7 @@ export class LineForceCalculator implements ILineForceCalculator {
         winchPos: Vector3D,
         attachPos: Vector3D,
         targetLength: number,
-        kiteVelocity: Vector3D,
+        state: KitePhysicsState,
         isLeft: boolean
     ): { force: Vector3D; tension: number; distance: number } {
         // Vecteur ligne et distance
@@ -150,22 +166,40 @@ export class LineForceCalculator implements ILineForceCalculator {
         }
         
         const lineDirection = lineVector.clone().normalize();
-        const restLength = targetLength * this.config.restLengthRatio;
+        const restLength = targetLength; // Longueur de repos = longueur cible (basée sur la géométrie réelle)
+        const attachmentOffset = new THREE.Vector3().subVectors(attachPos, state.position);
+        const rotationalVelocity = new THREE.Vector3()
+            .copy(state.angularVelocity)
+            .cross(attachmentOffset);
+        const attachVelocity = state.velocity.clone().add(rotationalVelocity);
         
         let tension = 0;
         
         if (currentDistance < restLength) {
-            // Régime 1 : Tension minimale
+            // Régime 1 : Tension minimale (ligne détendue)
             tension = this.config.minTension;
         } else {
-            // Régime 2 : Modèle ressort-amortisseur
+            // Régime 2 : Ligne tendue - Modèle HYBRIDE Linéaire-Exponentiel
             const extension = currentDistance - restLength;
             
             // Vitesse radiale (projection de la vitesse sur la direction de la ligne)
-            const radialVelocity = kiteVelocity.dot(lineDirection);
+            const radialVelocity = attachVelocity.dot(lineDirection);
             
-            // Force = k × Δl + c × v
-            const springForce = this.config.stiffness * extension;
+            // Calcul de la force de rappel selon l'extension
+            let springForce: number;
+            
+            if (extension < this.config.exponentialThreshold) {
+                // 🔵 ZONE LINÉAIRE (proche du repos) : F = k × Δl
+                springForce = this.config.stiffness * extension;
+            } else {
+                // 🔴 ZONE EXPONENTIELLE (loin du repos) : F = k_exp × (e^(α×(Δl-seuil)) - 1) + F_seuil
+                const thresholdForce = this.config.stiffness * this.config.exponentialThreshold;
+                const excessExtension = extension - this.config.exponentialThreshold;
+                const expTerm = Math.exp(this.config.exponentialRate * excessExtension) - 1;
+                springForce = this.config.exponentialStiffness * expTerm + thresholdForce;
+            }
+            
+            // Amortissement (inchangé)
             const dampingForce = this.config.damping * radialVelocity;
             
             tension = springForce + dampingForce;
@@ -173,6 +207,7 @@ export class LineForceCalculator implements ILineForceCalculator {
         }
         
         // Lissage temporel pour éviter oscillations
+        // ✅ CORRECTION: Lissage exponentiel sans test de première valeur
         const alpha = this.config.smoothingCoefficient;
         if (isLeft) {
             this.smoothedLeftTension = alpha * tension + (1 - alpha) * this.smoothedLeftTension;
@@ -192,8 +227,9 @@ export class LineForceCalculator implements ILineForceCalculator {
      * Réinitialise les tensions lissées (appelé lors d'un reset).
      */
     reset(): void {
-        this.smoothedLeftTension = 0;
-        this.smoothedRightTension = 0;
+        // ✅ CORRECTION: Réinitialiser avec minTension au lieu de 0
+        this.smoothedLeftTension = this.config.minTension;
+        this.smoothedRightTension = this.config.minTension;
     }
     
     /**
@@ -201,5 +237,19 @@ export class LineForceCalculator implements ILineForceCalculator {
      */
     setWinchPositions(positions: WinchPositions): void {
         this.winchPositions = positions;
+    }
+
+    /**
+     * Résout la position d'attache d'une ligne en testant plusieurs alias.
+     */
+    private resolveAttachPoint(names: string[], fallback: Vector3D): Vector3D {
+        for (const name of names) {
+            const point = this.kite.getGlobalPointPosition(name);
+            if (point) {
+                return point;
+            }
+        }
+
+        return fallback.clone();
     }
 }

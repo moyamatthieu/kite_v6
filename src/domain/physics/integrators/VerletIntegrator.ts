@@ -40,11 +40,15 @@ export class VerletIntegrator implements IIntegrator {
         const acceleration = force.clone().divideScalar(mass);
         
         // 2. Intégration vitesse : v_new = v + a × dt
+        // 🔧 CORRECTION MAJEURE : Amortissement doit être MINIMAL
+        // La résistance de l'air vient de la TRAÎNÉE (force aéro), pas d'un amortissement global
+        // dampingFactor ≈ 1.0 = pas de friction artificielle
+        const dampingForThisStep = Math.pow(this.config.dampingFactor, deltaTime);
         newState.velocity = state.velocity.clone()
             .add(acceleration.clone().multiplyScalar(deltaTime))
-            .multiplyScalar(this.config.dampingFactor); // Amortissement numérique
+            .multiplyScalar(dampingForThisStep);
         
-        // Limiter la vitesse
+        // Limiter la vitesse (sécurité numérique uniquement)
         const speed = newState.velocity.length();
         if (speed > this.config.maxVelocity) {
             newState.velocity.normalize().multiplyScalar(this.config.maxVelocity);
@@ -55,16 +59,23 @@ export class VerletIntegrator implements IIntegrator {
             .add(newState.velocity.clone().multiplyScalar(deltaTime));
         
         // 4. Rotation (similaire mais pour quaternions)
-        // Accélération angulaire (simplifié, inertie constante)
-        const inertia = 0.1; // kg·m² (simplifié)
+        // Accélération angulaire : α = τ / I
+        // Inertie pour kite rectangulaire : I ≈ (1/12) × m × (L² + h²)
+        // Pour wingspan=1.65m, height=0.65m, mass=0.4kg
+        // I = (1/12) × 0.4 × (1.65² + 0.65²) ≈ 0.108 kg·m²
+        // 🔧 Valeur réaliste basée sur géométrie
+        const L = 1.65; // wingspan
+        const h = 0.65; // height
+        const inertia = (1/12) * mass * (L*L + h*h); // ≈ 0.108 kg·m²
         const angularAcceleration = torque.clone().divideScalar(inertia);
         
         // Intégration vitesse angulaire
+        // 🔧 Même amortissement minimal que pour vitesse linéaire
         newState.angularVelocity = state.angularVelocity.clone()
             .add(angularAcceleration.clone().multiplyScalar(deltaTime))
-            .multiplyScalar(this.config.dampingFactor);
+            .multiplyScalar(dampingForThisStep);
         
-        // Limiter la vitesse angulaire
+        // Limiter la vitesse angulaire (sécurité numérique)
         const angularSpeed = newState.angularVelocity.length();
         if (angularSpeed > this.config.maxAngularVelocity) {
             newState.angularVelocity.normalize().multiplyScalar(this.config.maxAngularVelocity);
@@ -76,9 +87,11 @@ export class VerletIntegrator implements IIntegrator {
         if (angle > 0.001) {
             const axis = newState.angularVelocity.clone().normalize();
             const deltaRotation = new THREE.Quaternion().setFromAxisAngle(axis, angle);
-            newState.orientation = state.orientation.clone().multiply(deltaRotation).normalize();
+            newState.orientation = state.orientation.clone().multiply(deltaRotation);
+            // ✅ CORRECTION: Toujours normaliser après multiplication de quaternions
+            newState.orientation.normalize();
         } else {
-            newState.orientation = state.orientation.clone();
+            newState.orientation = state.orientation.clone().normalize();
         }
         
         // 5. Stocker accélérations pour debug

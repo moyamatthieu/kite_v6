@@ -41,6 +41,8 @@ export enum SimulationEventType {
     // Événements UI
     UI_CONTROL_PANEL_CHANGE = 'ui:control:panel:change',
     UI_DEBUG_TOGGLE = 'ui:debug:toggle',
+    UI_TRAJECTORY_TOGGLE = 'ui:trajectory:toggle',
+    UI_GRID_TOGGLE = 'ui:grid:toggle',
     
     // Événements logging
     LOG_MESSAGE = 'log:message',

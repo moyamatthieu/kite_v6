@@ -85,78 +85,123 @@ export class KiteGeometry {
     }
     
     /**
-     * Définit les points structurels principaux.
+     * Définit les points structurels principaux du cerf-volant.
+     * Architecture : Delta avec bords d'attaque, barre horizontale et whiskers arrière.
      */
     private defineStructuralPoints(): void {
         const { wingspan, height } = this.parameters;
         
-        // Points principaux
+        // === POINTS PRINCIPAUX ===
+        
+        // Sommet (nez) du cerf-volant
         const nose = new THREE.Vector3(0, height, 0);
+        
+        // Base de la colonne vertébrale (centre du bas)
         const spineBottom = new THREE.Vector3(0, 0, 0);
+        
+        // Extrémités des ailes (bout des bords d'attaque)
         const leftWingTip = new THREE.Vector3(-wingspan / 2, 0, 0);
         const rightWingTip = new THREE.Vector3(wingspan / 2, 0, 0);
         
-        // Points intermédiaires (75% de la hauteur)
-        const intermediateRatio = 0.75;
-        const intermediateHeight = height * intermediateRatio;
-        const intermediateWidth = wingspan * 0.3;
+        // === BARRE HORIZONTALE (traverse à Y=0.2) ===
         
+        const horizontalBarHeight = 0.2; // Hauteur de la barre horizontale
+        
+        // Points intermédiaires : intersection barre horizontale / bords d'attaque
+        // Calculés par interpolation linéaire sur les lignes NOSE → WING_TIP
+        const leftT = (horizontalBarHeight - nose.y) / (leftWingTip.y - nose.y);
         const leftIntermediate = new THREE.Vector3(
-            -intermediateWidth,
-            intermediateHeight,
-            0
+            nose.x + (leftWingTip.x - nose.x) * leftT,
+            horizontalBarHeight,
+            nose.z + (leftWingTip.z - nose.z) * leftT
         );
+        
+        const rightT = (horizontalBarHeight - nose.y) / (rightWingTip.y - nose.y);
         const rightIntermediate = new THREE.Vector3(
-            intermediateWidth,
-            intermediateHeight,
-            0
+            nose.x + (rightWingTip.x - nose.x) * rightT,
+            horizontalBarHeight,
+            nose.z + (rightWingTip.z - nose.z) * rightT
         );
         
-        // Point central (bas de la spine)
-        const center = spineBottom.clone();
+        // Point central sur la barre horizontale (intersection avec la colonne vertébrale)
+        const center = new THREE.Vector3(0, horizontalBarHeight, 0);
         
-        // Points whisker (stabilisateurs arrière)
-        const whiskerLength = wingspan * 0.15;
-        const leftWhisker = new THREE.Vector3(-wingspan / 2 - whiskerLength, 0, 0);
-        const rightWhisker = new THREE.Vector3(wingspan / 2 + whiskerLength, 0, 0);
+        // === WHISKERS (stabilisateurs arrière) ===
         
-        // Enregistrer les points
-        this.points.set('NOSE', nose);
-        this.points.set('SPINE_BOTTOM', spineBottom);
-        this.points.set('LEFT_WING_TIP', leftWingTip);
-        this.points.set('RIGHT_WING_TIP', rightWingTip);
-        this.points.set('LEFT_INTERMEDIATE', leftIntermediate);
-        this.points.set('RIGHT_INTERMEDIATE', rightIntermediate);
-        this.points.set('CENTER', center);
-        this.points.set('LEFT_WHISKER', leftWhisker);
-        this.points.set('RIGHT_WHISKER', rightWhisker);
+        // Points de base : milieu de chaque demi-barre horizontale
+        const leftWhiskerBase = new THREE.Vector3(
+            (center.x + leftIntermediate.x) / 2,
+            horizontalBarHeight,
+            (center.z + leftIntermediate.z) / 2
+        );
+        
+        const rightWhiskerBase = new THREE.Vector3(
+            (center.x + rightIntermediate.x) / 2,
+            horizontalBarHeight,
+            (center.z + rightIntermediate.z) / 2
+        );
+        
+        // Whiskers : partent vers l'arrière (Z négatif) pour créer du volume
+        const whiskerDepth = wingspan * 0.15;
+        const leftWhisker = new THREE.Vector3(
+            leftWhiskerBase.x,
+            leftWhiskerBase.y,
+            leftWhiskerBase.z - whiskerDepth
+        );
+        
+        const rightWhisker = new THREE.Vector3(
+            rightWhiskerBase.x,
+            rightWhiskerBase.y,
+            rightWhiskerBase.z - whiskerDepth
+        );
+        
+        // === ENREGISTREMENT DES POINTS ===
+        
+        // Points structurels principaux
+        this.points.set('NEZ', nose);                           // Sommet du cerf-volant
+        this.points.set('BAS_COLONNE', spineBottom);           // Base de la colonne vertébrale
+        this.points.set('EXTREMITE_AILE_GAUCHE', leftWingTip); // Bout de l'aile gauche
+        this.points.set('EXTREMITE_AILE_DROITE', rightWingTip);// Bout de l'aile droite
+        
+        // Barre horizontale (traverse)
+        this.points.set('TRAVERSE_GAUCHE', leftIntermediate);   // Intersection traverse/bord d'attaque gauche
+        this.points.set('TRAVERSE_DROITE', rightIntermediate);  // Intersection traverse/bord d'attaque droit
+        this.points.set('CENTRE', center);                      // Centre de la traverse
+        
+        // Stabilisateurs arrière (whiskers)
+        this.points.set('BASE_STAB_GAUCHE', leftWhiskerBase);  // Base du stabilisateur gauche
+        this.points.set('BASE_STAB_DROIT', rightWhiskerBase);  // Base du stabilisateur droit
+        this.points.set('STAB_GAUCHE', leftWhisker);           // Extrémité du stabilisateur gauche
+        this.points.set('STAB_DROIT', rightWhisker);           // Extrémité du stabilisateur droit
     }
     
     /**
      * Calcule les points de contrôle des brides par trilatération 3D.
      */
     private defineControlPoints(): void {
-        const nose = this.points.get('NOSE')!;
-        const leftIntermediate = this.points.get('LEFT_INTERMEDIATE')!;
-        const rightIntermediate = this.points.get('RIGHT_INTERMEDIATE')!;
-        const center = this.points.get('CENTER')!;
+        const nez = this.points.get('NEZ')!;
+        const traverseGauche = this.points.get('TRAVERSE_GAUCHE')!;
+        const traverseDroite = this.points.get('TRAVERSE_DROITE')!;
+        const centre = this.points.get('CENTRE')!;
         
         const { bridles } = this.parameters;
         
-        // Calcul point de contrôle gauche
-        const leftControl = this.trilaterationSolve(
-            nose, leftIntermediate, center,
-            bridles.nose, bridles.intermediate, bridles.center
+        // Calcul point de contrôle gauche (z positif = vers l'avant)
+        const pointControleGauche = this.trilaterationSolve(
+            nez, traverseGauche, centre,
+            bridles.nose, bridles.intermediate, bridles.center,
+            true  // Forcer z positif
         );
         
-        // Calcul point de contrôle droit
-        const rightControl = this.trilaterationSolve(
-            nose, rightIntermediate, center,
-            bridles.nose, bridles.intermediate, bridles.center
+        // Calcul point de contrôle droit (z positif = vers l'avant)
+        const pointControleDroit = this.trilaterationSolve(
+            nez, traverseDroite, centre,
+            bridles.nose, bridles.intermediate, bridles.center,
+            true  // Forcer z positif
         );
         
-        this.points.set('LEFT_CONTROL', leftControl);
-        this.points.set('RIGHT_CONTROL', rightControl);
+        this.points.set('CONTROLE_GAUCHE', pointControleGauche);
+        this.points.set('CONTROLE_DROIT', pointControleDroit);
     }
     
     /**
@@ -168,11 +213,13 @@ export class KiteGeometry {
      * @param r1 - Rayon de la sphère 1
      * @param r2 - Rayon de la sphère 2
      * @param r3 - Rayon de la sphère 3
+     * @param forcePositiveZ - Force le point devant le cerf-volant (Z+)
      * @returns Point d'intersection
      */
     private trilaterationSolve(
         p1: Vector3D, p2: Vector3D, p3: Vector3D,
-        r1: number, r2: number, r3: number
+        r1: number, r2: number, r3: number,
+        forcePositiveZ: boolean = true
     ): Vector3D {
         // Base orthonormée locale
         const ex = new THREE.Vector3().subVectors(p2, p1).normalize();
@@ -189,13 +236,18 @@ export class KiteGeometry {
         const y = (r1 * r1 - r3 * r3 + i * i + j * j) / (2 * j) - (i / j) * x;
         
         const zSq = r1 * r1 - x * x - y * y;
-        const z = zSq > 0 ? Math.sqrt(zSq) : 0;
+        let z = zSq > 0 ? Math.sqrt(zSq) : 0;
         
-        // Conversion vers repère global (choisir +z pour point devant le cerf-volant)
+        // Si forcePositiveZ est activé et que ez pointe vers l'arrière, inverser z
+        if (forcePositiveZ && ez.z < 0) {
+            z = -z;
+        }
+        
+        // Conversion vers repère global
         const result = p1.clone()
             .add(ex.clone().multiplyScalar(x))
             .add(ey.clone().multiplyScalar(y))
-            .add(ez.clone().multiplyScalar(z)); // Positif = vers l'avant
+            .add(ez.clone().multiplyScalar(z));
         
         return result;
     }
@@ -205,25 +257,44 @@ export class KiteGeometry {
      */
     private defineConnections(): void {
         this.connections = [
-            ['NOSE', 'SPINE_BOTTOM'],
-            ['NOSE', 'LEFT_WING_TIP'],
-            ['NOSE', 'RIGHT_WING_TIP'],
-            ['LEFT_INTERMEDIATE', 'RIGHT_INTERMEDIATE'],
-            ['LEFT_WING_TIP', 'LEFT_WHISKER'],
-            ['RIGHT_WING_TIP', 'RIGHT_WHISKER'],
+            // Colonne vertébrale centrale
+            ['NEZ', 'BAS_COLONNE'],
+            
+            // Bords d'attaque (du nez aux extrémités des ailes)
+            ['NEZ', 'EXTREMITE_AILE_GAUCHE'],
+            ['NEZ', 'EXTREMITE_AILE_DROITE'],
+            
+            // Barre horizontale (traverse complète)
+            ['TRAVERSE_GAUCHE', 'TRAVERSE_DROITE'],
+            
+            // Stabilisateurs arrière (barres pour le volume)
+            ['BASE_STAB_GAUCHE', 'STAB_GAUCHE'],
+            ['BASE_STAB_DROIT', 'STAB_DROIT'],
         ];
     }
     
     /**
-     * Définit les panneaux (ordre des sommets pour normale cohérente).
+     * Définit les panneaux (toile du cerf-volant).
+     * 4 panneaux quadrilatéraux formant une surface continue déformée en 3D.
+     * Ordre anti-horaire vu de face pour normale vers +Z (extrados).
      */
     private definePanels(): void {
         this.panels = [
-            // Ordre anti-horaire vu de face pour normale vers +Z (extrados)
-            ['NOSE', 'LEFT_INTERMEDIATE', 'LEFT_WING_TIP'],
-            ['NOSE', 'RIGHT_WING_TIP', 'RIGHT_INTERMEDIATE'],
-            ['LEFT_INTERMEDIATE', 'CENTER', 'LEFT_WING_TIP'],
-            ['RIGHT_INTERMEDIATE', 'RIGHT_WING_TIP', 'CENTER'],
+            // Panneau supérieur gauche
+            // Du nez vers le stabilisateur gauche en passant par la traverse et le bas de la colonne
+            ['NEZ', 'TRAVERSE_GAUCHE', 'STAB_GAUCHE', 'BAS_COLONNE'],
+            
+            // Panneau supérieur droit
+            // Du nez vers le stabilisateur droit en passant par le bas de la colonne et la traverse
+            ['NEZ', 'BAS_COLONNE', 'STAB_DROIT', 'TRAVERSE_DROITE'],
+            
+            // Panneau inférieur gauche
+            // De la traverse vers l'extrémité de l'aile (triangle dégénéré en quad)
+            ['TRAVERSE_GAUCHE', 'EXTREMITE_AILE_GAUCHE', 'STAB_GAUCHE', 'STAB_GAUCHE'],
+            
+            // Panneau inférieur droit
+            // De la traverse vers l'extrémité de l'aile (triangle dégénéré en quad)
+            ['TRAVERSE_DROITE', 'STAB_DROIT', 'EXTREMITE_AILE_DROITE', 'EXTREMITE_AILE_DROITE'],
         ];
     }
     

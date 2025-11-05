@@ -50,8 +50,15 @@ export class Renderer {
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         
+        // Styles du canvas pour interactions
+        const canvas = this.renderer.domElement;
+        canvas.style.display = 'block';
+        canvas.style.cursor = 'grab';
+        canvas.style.outline = 'none';
+        canvas.tabIndex = 1; // Permettre le focus clavier
+        
         // Ajouter au DOM
-        container.appendChild(this.renderer.domElement);
+        container.appendChild(canvas);
         
         // Gérer redimensionnement
         window.addEventListener('resize', () => this.handleResize());
@@ -90,6 +97,13 @@ export class Renderer {
     dispose(): void {
         this.renderer.dispose();
         this.container.removeChild(this.renderer.domElement);
+    }
+    
+    /**
+     * Retourne le canvas du renderer.
+     */
+    getCanvas(): HTMLCanvasElement {
+        return this.renderer.domElement;
     }
     
     /**

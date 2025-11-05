@@ -115,6 +115,11 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
     
     /**
      * Calcule la force sur un panneau spécifique.
+     * 
+     * La portance dépend de l'angle d'attaque et de l'orientation relative au vent.
+     * Pour un profil aérodynamique correctement orienté :
+     * - Intrados frappé par le vent (normalWindComponent > 0) : portance positive
+     * - Extrados frappé par le vent (normalWindComponent < 0) : portance négative (profil inversé)
      */
     private calculatePanelForce(
         panelIndex: number,
@@ -125,29 +130,48 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
     ): { lift: Vector3D; drag: Vector3D } {
         const panelNormal = this.kite.getGlobalPanelNormal(panelIndex);
         const panelArea = this.kite.getPanelArea(panelIndex);
+
+        // Composante du vent sur la normale du panneau
+        // windDirection = direction où VA le vent (de Z- vers Z+)
+        // Le kite regarde vers Z- (vers le pilote), donc son intrados fait face à Z-
+        // Le vent arrive de Z- (derrière le kite), donc windDirection et normale sont opposés
+        const normalWindComponent = panelNormal.dot(windDirection);
+
+        // Angle d'attaque basé sur la valeur absolue (pour les courbes Cl/Cd standards)
+        const alpha = Math.asin(Math.min(1, Math.abs(normalWindComponent)));
         
-        // Angle d'attaque du panneau
-        const alpha = Math.asin(Math.abs(panelNormal.dot(windDirection)));
-        
-        // Coefficients
         const Cl = this.getLiftCoefficient(alpha);
         const Cd = this.getDragCoefficient(alpha);
         
         // Pression dynamique : q = 0.5 * ρ * v²
         const dynamicPressure = 0.5 * this.config.airDensity * windSpeed * windSpeed;
         
-        // Forces
+        // Forces aérodynamiques : F = q * S * C
         const liftMagnitude = dynamicPressure * panelArea * Cl;
         const dragMagnitude = dynamicPressure * panelArea * Cd;
-        
-        // Direction portance: perpendiculaire au vent dans le plan (normale, vent)
-        const liftDirection = new THREE.Vector3()
-            .crossVectors(panelNormal, windDirection)
-            .cross(windDirection)
+
+        // 🔧 TRAÎNÉE : Opposée au vent apparent (dans la direction -windDirection)
+        const drag = windDirection.clone().multiplyScalar(-dragMagnitude);
+
+        // 🔧 PORTANCE : Perpendiculaire au vent apparent
+        // Calculer la portance dans le plan (normale, vent)
+        // Direction de portance = normale - (normale·vent)*vent (projection orthogonale)
+        const normalDotWind = panelNormal.dot(windDirection);
+        const liftDirection = panelNormal.clone()
+            .sub(windDirection.clone().multiplyScalar(normalDotWind))
             .normalize();
         
-        const lift = liftDirection.multiplyScalar(liftMagnitude);
-        const drag = windDirection.clone().multiplyScalar(-dragMagnitude); // Opposé au vent
+        // Si le vent est parallèle à la normale, pas de portance latérale
+        if (liftDirection.length() < 0.01) {
+            return { 
+                lift: new THREE.Vector3(0, 0, 0), 
+                drag 
+            };
+        }
+        
+        // Signe de la portance : positif si le vent frappe l'intrados
+        const liftSign = Math.sign(normalDotWind) || 1; // Éviter 0
+        const lift = liftDirection.multiplyScalar(liftMagnitude * liftSign);
         
         return { lift, drag };
     }
@@ -155,16 +179,30 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
     /**
      * Coefficient de portance en fonction de l'angle d'attaque.
      * 
-     * Modèle simplifié linéaire jusqu'au décrochage.
+     * Modèle pour cerf-volant : portance maximale à ~15-20°, puis décrochage progressif.
+     * Courbe Cl(α) linéaire jusqu'à 15°, puis décrochage progressif.
      */
     private getLiftCoefficient(alpha: number): number {
         const alphaDeg = (alpha * 180) / Math.PI;
         
-        if (alphaDeg < 0) return 0;
-        if (alphaDeg > 25) return 0.5; // Décrochage
+        if (alphaDeg <= 15) {
+            // Zone linéaire (0-15°) : Cl croît linéairement avec l'angle
+            return this.config.referenceLiftCoefficient * (alphaDeg / 15);
+        }
         
-        // Linéaire: Cl = Cl_ref * (alpha / 15°)
-        return this.config.referenceLiftCoefficient * (alphaDeg / 15);
+        if (alphaDeg <= 25) {
+            // Zone de portance maximale (15-25°)
+            return this.config.referenceLiftCoefficient;
+        }
+        
+        if (alphaDeg <= 45) {
+            // Décrochage progressif (25-45°)
+            const t = (alphaDeg - 25) / 20;
+            return this.config.referenceLiftCoefficient * (1 - 0.5 * t);
+        }
+        
+        // Décrochage complet (>45°)
+        return this.config.referenceLiftCoefficient * 0.5;
     }
     
     /**

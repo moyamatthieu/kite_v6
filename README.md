@@ -135,9 +135,9 @@ Le panneau de contrôle permet de :
 ### Système de Coordonnées
 
 ```
-X+ : Direction du vent (souffle de X+ vers X-)
+X+ : Axe latéral (vers la droite du pilote)
 Y+ : Altitude (vers le haut)
-Z+ : Extrados du cerf-volant (face exposée)
+Z+ : Direction du vent (souffle de Z+ vers Z-)
 ```
 
 ### Forces Calculées
