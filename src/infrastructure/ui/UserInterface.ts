@@ -65,6 +65,86 @@ export class UserInterface {
     }
 
     /**
+     * Fonction factory pour créer un slider avec label et valeur.
+     * Principe DRY (Don't Repeat Yourself) - Élimine la duplication de code HTML.
+     * 
+     * @param id - Identifiant unique du slider (sans suffixe -slider/-value)
+     * @param label - Label affiché à gauche
+     * @param unit - Unité affichée après la valeur (ex: "m/s", "m", "")
+     * @param min - Valeur minimale
+     * @param max - Valeur maximale
+     * @param step - Pas d'incrémentation
+     * @param value - Valeur initiale
+     * @param showInLabel - Si true, affiche la valeur dans le label principal (style vent/longueur)
+     * @returns HTML du slider complet
+     */
+    private createSlider(
+        id: string,
+        label: string,
+        unit: string,
+        min: number,
+        max: number,
+        step: number,
+        value: number,
+        showInLabel: boolean = false
+    ): string {
+        const formattedValue = step < 1 ? value.toFixed(2) : value.toFixed(1);
+        
+        if (showInLabel) {
+            // Style vent/longueur (valeur dans le label principal)
+            return `
+                <div style="margin-bottom: 15px;">
+                    <div style="font-size: 12px; color: #00ff88; font-weight: 600; margin-bottom: 8px;">
+                        ${label}: <span id="${id}-value" style="color: #fff;">${formattedValue} ${unit}</span>
+                    </div>
+                    <input type="range"
+                           id="${id}-slider"
+                           min="${min}"
+                           max="${max}"
+                           value="${value}"
+                           step="${step}"
+                           style="
+                               width: 100%;
+                               height: 6px;
+                               -webkit-appearance: none;
+                               appearance: none;
+                               background: linear-gradient(to right, #666 0%, #00ff88 50%, #666 100%);
+                               border-radius: 3px;
+                               cursor: pointer;
+                               outline: none;
+                           ">
+                </div>
+            `;
+        } else {
+            // Style brides (label + valeur séparés)
+            return `
+                <div style="margin-bottom: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                        <span style="font-size: 11px; color: #aaa;">${label}:</span>
+                        <span id="${id}-value" style="font-size: 11px; color: #00ff88; font-weight: 600;">${formattedValue}${unit ? ' ' + unit : ''}</span>
+                    </div>
+                    <input type="range"
+                           id="${id}-slider"
+                           min="${min}"
+                           max="${max}"
+                           value="${value}"
+                           step="${step}"
+                           style="
+                               width: 100%;
+                               height: 6px;
+                               -webkit-appearance: none;
+                               appearance: none;
+                               background: linear-gradient(to right, #666 0%, #00ff88 50%, #666 100%);
+                               border-radius: 3px;
+                               cursor: pointer;
+                               outline: none;
+                           ">
+                </div>
+            `;
+        }
+    }
+
+    /**
      * Crée le panneau de contrôle de simulation (en haut à gauche).
      */
     private createSimulationControlPanel(): void {
@@ -149,49 +229,9 @@ export class UserInterface {
                 ">🔢 PANNEAUX</button>
             </div>
 
-            <div style="margin-bottom: 15px;">
-                <div style="font-size: 12px; color: #00ff88; font-weight: 600; margin-bottom: 8px;">
-                    � Vent: <span id="wind-speed-value" style="color: #fff;">3.0 m/s</span> <span style="color: #aaa; font-size: 10px;">(~2.5 Beaufort)</span>
-                </div>
-                <input type="range"
-                       id="wind-speed-slider"
-                       min="0"
-                       max="15"
-                       value="3"
-                       step="0.1"
-                       style="
-                           width: 100%;
-                           height: 6px;
-                           -webkit-appearance: none;
-                           appearance: none;
-                           background: linear-gradient(to right, #666 0%, #00ff88 50%, #666 100%);
-                           border-radius: 3px;
-                           cursor: pointer;
-                           outline: none;
-                       ">
-            </div>
+            ${this.createSlider('wind-speed', '🌬️ Vent', 'm/s', 0, 15, 0.1, 3, true)}
 
-            <div style="margin-bottom: 15px;">
-                <div style="font-size: 12px; color: #00ff88; font-weight: 600; margin-bottom: 8px;">
-                    �📏 Longueur des lignes: <span id="line-length-value" style="color: #fff;">15.0 m</span>
-                </div>
-                <input type="range"
-                       id="line-length-slider"
-                       min="0"
-                       max="50"
-                       value="15"
-                       step="0.5"
-                       style="
-                           width: 100%;
-                           height: 6px;
-                           -webkit-appearance: none;
-                           appearance: none;
-                           background: linear-gradient(to right, #666 0%, #00ff88 50%, #666 100%);
-                           border-radius: 3px;
-                           cursor: pointer;
-                           outline: none;
-                       ">
-            </div>
+            ${this.createSlider('line-length', '📏 Longueur des lignes', 'm', 0, 50, 0.5, 15, true)}
 
             <div style="margin-bottom: 10px;">
                 <div style="font-size: 12px; color: #00ff88; font-weight: 600; margin-bottom: 8px;">
@@ -199,74 +239,9 @@ export class UserInterface {
                 </div>
             </div>
 
-            <div style="margin-bottom: 10px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <span style="font-size: 11px; color: #aaa;">Nez:</span>
-                    <span id="bridle-nose-value" style="font-size: 11px; color: #00ff88; font-weight: 600;">0.65</span>
-                </div>
-                <input type="range"
-                       id="bridle-nose-slider"
-                       min="0.2"
-                       max="0.8"
-                       value="0.65"
-                       step="0.01"
-                       style="
-                           width: 100%;
-                           height: 6px;
-                           -webkit-appearance: none;
-                           appearance: none;
-                           background: linear-gradient(to right, #666 0%, #00ff88 50%, #666 100%);
-                           border-radius: 3px;
-                           cursor: pointer;
-                           outline: none;
-                       ">
-            </div>
-
-            <div style="margin-bottom: 10px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <span style="font-size: 11px; color: #aaa;">Intermédiaire:</span>
-                    <span id="bridle-intermediate-value" style="font-size: 11px; color: #00ff88; font-weight: 600;">0.65</span>
-                </div>
-                <input type="range"
-                       id="bridle-intermediate-slider"
-                       min="0.2"
-                       max="0.8"
-                       value="0.65"
-                       step="0.01"
-                       style="
-                           width: 100%;
-                           height: 6px;
-                           -webkit-appearance: none;
-                           appearance: none;
-                           background: linear-gradient(to right, #666 0%, #00ff88 50%, #666 100%);
-                           border-radius: 3px;
-                           cursor: pointer;
-                           outline: none;
-                       ">
-            </div>
-
-            <div style="margin-bottom: 10px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <span style="font-size: 11px; color: #aaa;">Centre:</span>
-                    <span id="bridle-center-value" style="font-size: 11px; color: #00ff88; font-weight: 600;">0.65</span>
-                </div>
-                <input type="range"
-                       id="bridle-center-slider"
-                       min="0.2"
-                       max="0.8"
-                       value="0.65"
-                       step="0.01"
-                       style="
-                           width: 100%;
-                           height: 6px;
-                           -webkit-appearance: none;
-                           appearance: none;
-                           background: linear-gradient(to right, #666 0%, #00ff88 50%, #666 100%);
-                           border-radius: 3px;
-                           cursor: pointer;
-                           outline: none;
-                       ">
-            </div>
+            ${this.createSlider('bridle-nose', 'Nez', '', 0.2, 0.8, 0.01, 0.65, false)}
+            ${this.createSlider('bridle-intermediate', 'Intermédiaire', '', 0.2, 0.8, 0.01, 0.65, false)}
+            ${this.createSlider('bridle-center', 'Centre', '', 0.2, 0.8, 0.01, 0.65, false)}
         `;
 
         this.container.appendChild(controlPanel);
@@ -702,6 +677,7 @@ export class UserInterface {
     
     /**
      * Ajoute une entrée au log.
+     * ✅ OPTIMISÉ: Utilise appendChild au lieu de innerHTML pour éviter re-parsing complet
      */
     public addLog(message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info'): void {
         const colors = {
@@ -712,18 +688,34 @@ export class UserInterface {
         };
         
         const timestamp = new Date().toLocaleTimeString('fr-FR');
-        const entry = `
-            <div style="color: ${colors[type]}; margin-bottom: 4px;">
-                <span style="color: #666;">[${timestamp}]</span> ${message}
-            </div>
-        `;
         
+        // ✅ Créer élément DOM directement au lieu de HTML string
+        const logDiv = document.createElement('div');
+        logDiv.style.color = colors[type];
+        logDiv.style.marginBottom = '4px';
+        
+        const timeSpan = document.createElement('span');
+        timeSpan.style.color = '#666';
+        timeSpan.textContent = `[${timestamp}]`;
+        
+        logDiv.appendChild(timeSpan);
+        logDiv.appendChild(document.createTextNode(` ${message}`));
+        
+        // Ajouter au DOM
+        this.logContent.appendChild(logDiv);
+        
+        // Gérer limite d'entrées
+        while (this.logContent.children.length > this.maxLogEntries) {
+            this.logContent.removeChild(this.logContent.firstChild!);
+        }
+        
+        // Stocker la référence HTML pour la fonction copyLog
+        const entry = logDiv.outerHTML;
         this.logEntries.push(entry);
         if (this.logEntries.length > this.maxLogEntries) {
             this.logEntries.shift();
         }
         
-        this.logContent.innerHTML = this.logEntries.join('');
         this.logContent.scrollTop = this.logContent.scrollHeight;
     }
     
@@ -863,20 +855,41 @@ export class UserInterface {
             }
         }
 
-        const entryHtml = `
-            <div style="color: ${colors[entry.level]}; margin-bottom: 4px; font-size: 10px;">
-                <span style="color: #666;">[${timestamp}]</span>
-                <span style="color: ${colors[entry.level]}; margin-right: 4px;">${levelEmoji[entry.level]}</span>
-                ${message}
-            </div>
-        `;
-
+        // ✅ OPTIMISÉ: Créer élément DOM directement
+        const logDiv = document.createElement('div');
+        logDiv.style.color = colors[entry.level];
+        logDiv.style.marginBottom = '4px';
+        logDiv.style.fontSize = '10px';
+        
+        const timeSpan = document.createElement('span');
+        timeSpan.style.color = '#666';
+        timeSpan.textContent = `[${timestamp}]`;
+        
+        const emojiSpan = document.createElement('span');
+        emojiSpan.style.color = colors[entry.level];
+        emojiSpan.style.marginRight = '4px';
+        emojiSpan.textContent = levelEmoji[entry.level];
+        
+        logDiv.appendChild(timeSpan);
+        logDiv.appendChild(document.createTextNode(' '));
+        logDiv.appendChild(emojiSpan);
+        logDiv.appendChild(document.createTextNode(message));
+        
+        // Ajouter au DOM
+        this.logContent.appendChild(logDiv);
+        
+        // Gérer limite d'entrées
+        while (this.logContent.children.length > this.maxLogEntries) {
+            this.logContent.removeChild(this.logContent.firstChild!);
+        }
+        
+        // Stocker la référence HTML pour copyLog
+        const entryHtml = logDiv.outerHTML;
         this.logEntries.push(entryHtml);
         if (this.logEntries.length > this.maxLogEntries) {
             this.logEntries.shift();
         }
 
-        this.logContent.innerHTML = this.logEntries.join('');
         this.logContent.scrollTop = this.logContent.scrollHeight;
     }
     

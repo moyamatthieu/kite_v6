@@ -202,14 +202,24 @@ export class LinesVisualizer {
 
 /**
  * Visualiseur pour la trajectoire.
+ * ✅ OPTIMISÉ: Réutilise la géométrie au lieu de la recréer à chaque frame
  */
 export class TrajectoryVisualizer {
     private line: THREE.Line;
     private points: THREE.Vector3[] = [];
     private maxPoints = 2000;
+    private positionAttribute: THREE.BufferAttribute;
     
     constructor() {
+        // ✅ Créer un buffer préalloué pour toutes les positions
+        const positions = new Float32Array(this.maxPoints * 3);
+        this.positionAttribute = new THREE.BufferAttribute(positions, 3);
+        this.positionAttribute.setUsage(THREE.DynamicDrawUsage); // Indiquer que le buffer sera mis à jour fréquemment
+        
         const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', this.positionAttribute);
+        geometry.setDrawRange(0, 0); // Initialement, aucun point à dessiner
+        
         const material = MaterialFactory.createTrajectoryMaterial();
         this.line = new THREE.Line(geometry, material);
         this.line.frustumCulled = false;
@@ -221,17 +231,25 @@ export class TrajectoryVisualizer {
             this.points.shift();
         }
         
-        // Dispose de l'ancienne géométrie et en créer une nouvelle
-        // pour éviter l'erreur "Buffer size too small"
-        this.line.geometry.dispose();
-        const newGeometry = new THREE.BufferGeometry();
-        newGeometry.setFromPoints(this.points);
-        this.line.geometry = newGeometry;
+        // ✅ Mettre à jour le buffer existant au lieu de recréer la géométrie
+        const positions = this.positionAttribute.array as Float32Array;
+        for (let i = 0; i < this.points.length; i++) {
+            positions[i * 3] = this.points[i].x;
+            positions[i * 3 + 1] = this.points[i].y;
+            positions[i * 3 + 2] = this.points[i].z;
+        }
+        
+        // Indiquer que le buffer a été modifié
+        this.positionAttribute.needsUpdate = true;
+        
+        // Mettre à jour la plage de dessin pour n'afficher que les points valides
+        this.line.geometry.setDrawRange(0, this.points.length);
     }
     
     clear(): void {
         this.points = [];
-        this.line.geometry.setFromPoints([]);
+        // ✅ Mettre à jour la plage de dessin au lieu de recréer
+        this.line.geometry.setDrawRange(0, 0);
     }
     
     getObject(): THREE.Line {
@@ -240,6 +258,7 @@ export class TrajectoryVisualizer {
     
     dispose(): void {
         this.line.geometry.dispose();
+        (this.line.material as THREE.Material).dispose();
     }
 }
 
@@ -396,10 +415,12 @@ export class DebugVisualizer {
 /**
  * Visualiseur de numéros de panneaux sur l'extrados du cerf-volant.
  * Les numéros sont affichés comme des autocollants fixes parallèles aux faces.
+ * ✅ OPTIMISÉ: Cache les textures pour éviter de les recréer à chaque frame
  */
 export class PanelNumbersVisualizer {
     private group: THREE.Group;
     private decals: THREE.Mesh[] = [];
+    private textureCache: Map<number, THREE.CanvasTexture> = new Map();
     
     constructor() {
         this.group = new THREE.Group();
@@ -407,8 +428,13 @@ export class PanelNumbersVisualizer {
     
     /**
      * Crée une texture de numéro de panneau.
+     * ✅ OPTIMISÉ: Cache les textures pour réutilisation
      */
     private createNumberTexture(number: number, color: string = '#ffff00'): THREE.CanvasTexture {
+        // ✅ Vérifier si la texture existe déjà dans le cache
+        if (this.textureCache.has(number)) {
+            return this.textureCache.get(number)!;
+        }
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d')!;
         
@@ -438,6 +464,10 @@ export class PanelNumbersVisualizer {
         
         // Créer texture
         const texture = new THREE.CanvasTexture(canvas);
+        
+        // ✅ Stocker dans le cache
+        this.textureCache.set(number, texture);
+        
         return texture;
     }
     
@@ -554,21 +584,28 @@ export class PanelNumbersVisualizer {
     dispose(): void {
         this.decals.forEach(decal => {
             decal.geometry.dispose();
-            if ((decal.material as THREE.MeshBasicMaterial).map) {
-                (decal.material as THREE.MeshBasicMaterial).map!.dispose();
-            }
+            // ✅ Ne pas disposer les textures du cache ici, elles seront disposées à la fin
+            // if ((decal.material as THREE.MeshBasicMaterial).map) {
+            //     (decal.material as THREE.MeshBasicMaterial).map!.dispose();
+            // }
             (decal.material as THREE.Material).dispose();
         });
         this.decals = [];
+        
+        // ✅ Disposer toutes les textures du cache
+        this.textureCache.forEach(texture => texture.dispose());
+        this.textureCache.clear();
     }
 }
 
 /**
  * Visualiseur de labels pour les points structurels du cerf-volant.
+ * ✅ OPTIMISÉ: Réutilise les sprites existants au lieu de les recréer à chaque frame
  */
 export class GeometryLabelsVisualizer {
     private group: THREE.Group;
     private sprites: Map<string, THREE.Sprite> = new Map();
+    private textureCache: Map<string, THREE.CanvasTexture> = new Map();
     
     constructor() {
         this.group = new THREE.Group();
@@ -576,31 +613,39 @@ export class GeometryLabelsVisualizer {
     
     /**
      * Crée un sprite de texte pour un label.
+     * ✅ OPTIMISÉ: Cache les textures pour réutilisation
      */
     private createTextSprite(text: string, color: string = '#ffffff'): THREE.Sprite {
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d')!;
+        // ✅ Réutiliser la texture si elle existe
+        let texture = this.textureCache.get(text);
         
-        // Taille du canvas
-        canvas.width = 256;
-        canvas.height = 64;
+        if (!texture) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d')!;
+            
+            // Taille du canvas
+            canvas.width = 256;
+            canvas.height = 64;
+            
+            // Style du texte
+            context.font = 'Bold 32px Arial';
+            context.fillStyle = color;
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            
+            // Fond semi-transparent
+            context.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Texte
+            context.fillStyle = color;
+            context.fillText(text, canvas.width / 2, canvas.height / 2);
+            
+            // Créer texture et la mettre en cache
+            texture = new THREE.CanvasTexture(canvas);
+            this.textureCache.set(text, texture);
+        }
         
-        // Style du texte
-        context.font = 'Bold 32px Arial';
-        context.fillStyle = color;
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        
-        // Fond semi-transparent
-        context.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // Texte
-        context.fillStyle = color;
-        context.fillText(text, canvas.width / 2, canvas.height / 2);
-        
-        // Créer texture et sprite
-        const texture = new THREE.CanvasTexture(canvas);
         const material = new THREE.SpriteMaterial({ map: texture });
         const sprite = new THREE.Sprite(material);
         sprite.scale.set(0.3, 0.075, 1); // Échelle du sprite
@@ -610,12 +655,9 @@ export class GeometryLabelsVisualizer {
     
     /**
      * Met à jour les labels avec les points de la géométrie et les treuils.
+     * ✅ OPTIMISÉ: Réutilise les sprites existants
      */
     update(kite: Kite, controlStation?: ControlStationVisualizer): void {
-        // Nettoyer les sprites existants
-        this.sprites.forEach(sprite => this.group.remove(sprite));
-        this.sprites.clear();
-
         const geometry = kite.geometry;
         const state = kite.getState();
 
@@ -645,12 +687,16 @@ export class GeometryLabelsVisualizer {
                 .applyQuaternion(state.orientation)
                 .add(state.position);
 
-            // Créer sprite
-            const sprite = this.createTextSprite(pointName, '#00ffff');
+            // ✅ Réutiliser le sprite existant ou en créer un nouveau
+            let sprite = this.sprites.get(pointName);
+            if (!sprite) {
+                sprite = this.createTextSprite(pointName, '#00ffff');
+                this.sprites.set(pointName, sprite);
+                this.group.add(sprite);
+            }
+            
+            // Mettre à jour la position
             sprite.position.copy(worldPoint);
-
-            this.sprites.set(pointName, sprite);
-            this.group.add(sprite);
         });
 
         // Ajouter les labels des treuils si la station est fournie
@@ -658,16 +704,22 @@ export class GeometryLabelsVisualizer {
             const winchPositions = controlStation.getWinchPositions();
 
             // Label treuil gauche
-            const leftWinchSprite = this.createTextSprite('TREUIL_GAUCHE', '#ff00ff');
-            leftWinchSprite.position.copy(winchPositions.left).add(new THREE.Vector3(0, 0.2, 0)); // Légèrement au-dessus
-            this.sprites.set('TREUIL_GAUCHE', leftWinchSprite);
-            this.group.add(leftWinchSprite);
+            let leftWinchSprite = this.sprites.get('TREUIL_GAUCHE');
+            if (!leftWinchSprite) {
+                leftWinchSprite = this.createTextSprite('TREUIL_GAUCHE', '#ff00ff');
+                this.sprites.set('TREUIL_GAUCHE', leftWinchSprite);
+                this.group.add(leftWinchSprite);
+            }
+            leftWinchSprite.position.copy(winchPositions.left).add(new THREE.Vector3(0, 0.2, 0));
 
             // Label treuil droit
-            const rightWinchSprite = this.createTextSprite('TREUIL_DROIT', '#ff00ff');
-            rightWinchSprite.position.copy(winchPositions.right).add(new THREE.Vector3(0, 0.2, 0)); // Légèrement au-dessus
-            this.sprites.set('TREUIL_DROIT', rightWinchSprite);
-            this.group.add(rightWinchSprite);
+            let rightWinchSprite = this.sprites.get('TREUIL_DROIT');
+            if (!rightWinchSprite) {
+                rightWinchSprite = this.createTextSprite('TREUIL_DROIT', '#ff00ff');
+                this.sprites.set('TREUIL_DROIT', rightWinchSprite);
+                this.group.add(rightWinchSprite);
+            }
+            rightWinchSprite.position.copy(winchPositions.right).add(new THREE.Vector3(0, 0.2, 0));
         }
     }
     
@@ -681,11 +733,17 @@ export class GeometryLabelsVisualizer {
     
     dispose(): void {
         this.sprites.forEach(sprite => {
-            if (sprite.material.map) {
-                sprite.material.map.dispose();
-            }
+            this.group.remove(sprite);
+            // ✅ Ne pas disposer les textures du cache ici
+            // if (sprite.material.map) {
+            //     sprite.material.map.dispose();
+            // }
             sprite.material.dispose();
         });
         this.sprites.clear();
+        
+        // ✅ Disposer toutes les textures du cache
+        this.textureCache.forEach(texture => texture.dispose());
+        this.textureCache.clear();
     }
 }

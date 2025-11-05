@@ -1,6 +1,21 @@
 /**
  * Géométrie pure du cerf-volant (calculs mathématiques sans Three.js).
  * 
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * REPÈRE LOCAL DU CERF-VOLANT (avant rotation d'orientation)
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * La géométrie est définie dans le repère local du cerf-volant :
+ * - X+ = droite (aile droite)
+ * - Y+ = haut (vers le nez)
+ * - Z+ = avant (vers où regarde le kite AVANT rotation)
+ * 
+ * ⚠️ PANNEAUX : Ordre HORAIRE vu de face → normales pointent vers Z- (intrados)
+ * Les normales DOIVENT pointer vers l'intrados (face qui reçoit le vent)
+ * 
+ * ⚠️ ORIENTATION : En simulation, rotation de 180° sur Y appliquée pour que
+ * le kite regarde vers Z- (station) au lieu de Z+ dans le repère monde.
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
  * @module domain/kite/KiteGeometry
  */
 
@@ -276,25 +291,26 @@ export class KiteGeometry {
     /**
      * Définit les panneaux (toile du cerf-volant).
      * 4 panneaux quadrilatéraux formant une surface continue déformée en 3D.
-     * Ordre anti-horaire vu de face pour normale vers +Z (extrados).
+     * 🔧 Ordre HORAIRE vu de face pour normales vers -Z (intrados face au vent).
+     * Les normales doivent pointer vers la station de contrôle (Z-) pour recevoir le vent correctement.
      */
     private definePanels(): void {
         this.panels = [
             // Panneau supérieur gauche
-            // Du nez vers le stabilisateur gauche en passant par la traverse et le bas de la colonne
-            ['NEZ', 'TRAVERSE_GAUCHE', 'STAB_GAUCHE', 'BAS_COLONNE'],
+            // 🔧 INVERSÉ : Ordre horaire vu de face → normale vers Z- (intrados)
+            ['NEZ', 'BAS_COLONNE', 'STAB_GAUCHE', 'TRAVERSE_GAUCHE'],
             
             // Panneau supérieur droit
-            // Du nez vers le stabilisateur droit en passant par le bas de la colonne et la traverse
-            ['NEZ', 'BAS_COLONNE', 'STAB_DROIT', 'TRAVERSE_DROITE'],
+            // 🔧 INVERSÉ : Ordre horaire vu de face → normale vers Z- (intrados)
+            ['NEZ', 'TRAVERSE_DROITE', 'STAB_DROIT', 'BAS_COLONNE'],
             
             // Panneau inférieur gauche
-            // De la traverse vers l'extrémité de l'aile (triangle dégénéré en quad)
-            ['TRAVERSE_GAUCHE', 'EXTREMITE_AILE_GAUCHE', 'STAB_GAUCHE', 'STAB_GAUCHE'],
+            // 🔧 INVERSÉ : Ordre horaire vu de face → normale vers Z- (intrados)
+            ['TRAVERSE_GAUCHE', 'STAB_GAUCHE', 'EXTREMITE_AILE_GAUCHE', 'EXTREMITE_AILE_GAUCHE'],
             
             // Panneau inférieur droit
-            // De la traverse vers l'extrémité de l'aile (triangle dégénéré en quad)
-            ['TRAVERSE_DROITE', 'STAB_DROIT', 'EXTREMITE_AILE_DROITE', 'EXTREMITE_AILE_DROITE'],
+            // 🔧 INVERSÉ : Ordre horaire vu de face → normale vers Z- (intrados)
+            ['TRAVERSE_DROITE', 'EXTREMITE_AILE_DROITE', 'STAB_DROIT', 'STAB_DROIT'],
         ];
     }
     

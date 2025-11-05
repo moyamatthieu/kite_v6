@@ -150,11 +150,12 @@ export class KiteVisualizer {
     
     /**
      * Met à jour la position et l'orientation.
+     * ⚠️ Pas de transformation supplémentaire - l'orientation vient directement du PhysicsEngine
      */
     update(): void {
         const state = this.kite.getState();
         this.group.position.copy(state.position);
-        this.group.quaternion.copy(state.orientation);
+        this.group.quaternion.copy(state.orientation);  // Copie directe, pas de rotation ajoutée
     }
     
     /**

@@ -53,12 +53,12 @@ export class PhysicsEngine {
     // Cache du dernier résultat complet des lignes pour éviter les recalculs inutiles
     private lastLineResult?: LineForceResult;
     
-    // Debug vibrations - stocke les dernières valeurs pour détecter oscillations
-    private lastPositions: THREE.Vector3[] = [];
-    private lastVelocities: THREE.Vector3[] = [];
-    private lastAccelerations: THREE.Vector3[] = [];
-    private vibrationCheckInterval = 0;
-    private readonly maxHistorySize = 30; // 30 frames d'historique
+    // ✅ OPTIMISATION: Debug vibrations DÉSACTIVÉ - économie mémoire (90 Vector3)
+    // private lastPositions: THREE.Vector3[] = [];
+    // private lastVelocities: THREE.Vector3[] = [];
+    // private lastAccelerations: THREE.Vector3[] = [];
+    // private vibrationCheckInterval = 0;
+    // private readonly maxHistorySize = 30; // 30 frames d'historique
     
     constructor(
         kite: Kite,
@@ -208,24 +208,25 @@ export class PhysicsEngine {
             if (Math.abs(newState.angularVelocity.z) < angularThreshold) newState.angularVelocity.z = 0;
         }
 
+        // ✅ OPTIMISATION: Debug vibrations complètement DÉSACTIVÉ
         // 5. DEBUG VIBRATIONS - Stocker l'historique pour analyse
-        this.lastPositions.push(newState.position.clone());
-        this.lastVelocities.push(newState.velocity.clone());
-        this.lastAccelerations.push(newState.acceleration.clone());
+        // this.lastPositions.push(newState.position.clone());
+        // this.lastVelocities.push(newState.velocity.clone());
+        // this.lastAccelerations.push(newState.acceleration.clone());
         
         // Limiter la taille de l'historique
-        if (this.lastPositions.length > this.maxHistorySize) {
-            this.lastPositions.shift();
-            this.lastVelocities.shift();
-            this.lastAccelerations.shift();
-        }
+        // if (this.lastPositions.length > this.maxHistorySize) {
+        //     this.lastPositions.shift();
+        //     this.lastVelocities.shift();
+        //     this.lastAccelerations.shift();
+        // }
         
         // Analyser les vibrations toutes les 0.5 secondes
-        this.vibrationCheckInterval += dt;
-        if (this.vibrationCheckInterval >= 0.5) {
-            this.checkForVibrations(newState, totalForce, linesTorque);
-            this.vibrationCheckInterval = 0;
-        }
+        // this.vibrationCheckInterval += dt;
+        // if (this.vibrationCheckInterval >= 0.5) {
+        //     this.checkForVibrations(newState, totalForce, linesTorque);
+        //     this.vibrationCheckInterval = 0;
+        // }
 
         // 6. Mettre à jour l'état du cerf-volant
         this.kite.setState(newState);
@@ -345,7 +346,9 @@ export class PhysicsEngine {
     
     /**
      * Analyse les vibrations du kite pour détecter les oscillations anormales.
+     * ✅ OPTIMISATION: Fonction complètement DÉSACTIVÉE - économie CPU et mémoire
      */
+    /*
     private checkForVibrations(
         state: KitePhysicsState,
         totalForce: THREE.Vector3,
@@ -382,36 +385,7 @@ export class PhysicsEngine {
         const hasHighAcceleration = accelMean > 100 || accelMax > 200; // 🔧 Seuils relevés
         
         // 🔧 LOGS DÉSACTIVÉS - Trop verbeux
-        /*
-        // Logger si vibrations détectées
-        if (hasPositionOscillation || hasVelocityOscillation || hasHighAcceleration) {
-            console.warn('⚠️ VIBRATIONS DÉTECTÉES:');
-            console.warn(`   Position: σ=${stdDev.toFixed(3)}m ${hasPositionOscillation ? '❌ OSCILLATION' : '✓'}`);
-            console.warn(`   Vélocité: μ=${velocityMean.toFixed(2)}m/s σ=${velocityStdDev.toFixed(2)} ${hasVelocityOscillation ? '❌ OSCILLATION' : '✓'}`);
-            console.warn(`   Accélération: μ=${accelMean.toFixed(1)}m/s² max=${accelMax.toFixed(1)} ${hasHighAcceleration ? '❌ ÉLEVÉE' : '✓'}`);
-
-            // Logger l'état actuel
-            console.warn(`   État actuel:`);
-            console.warn(`     Pos: (${state.position.x.toFixed(2)}, ${state.position.y.toFixed(2)}, ${state.position.z.toFixed(2)})`);
-            console.warn(`     Vel: (${state.velocity.x.toFixed(2)}, ${state.velocity.y.toFixed(2)}, ${state.velocity.z.toFixed(2)}) |V|=${state.velocity.length().toFixed(2)}`);
-            console.warn(`     Acc: (${state.acceleration.x.toFixed(2)}, ${state.acceleration.y.toFixed(2)}, ${state.acceleration.z.toFixed(2)}) |A|=${state.acceleration.length().toFixed(2)}`);
-
-            // Logger les forces
-            console.warn(`   Forces:`);
-            console.warn(`     Aéro: (${this.lastForces.aerodynamic.x.toFixed(1)}, ${this.lastForces.aerodynamic.y.toFixed(1)}, ${this.lastForces.aerodynamic.z.toFixed(1)}) |F|=${this.lastForces.aerodynamic.length().toFixed(1)}N`);
-            console.warn(`     Gravité: (${this.lastForces.gravity.x.toFixed(1)}, ${this.lastForces.gravity.y.toFixed(1)}, ${this.lastForces.gravity.z.toFixed(1)}) |F|=${this.lastForces.gravity.length().toFixed(1)}N`);
-            console.warn(`     Lignes: (${this.lastForces.lines.x.toFixed(1)}, ${this.lastForces.lines.y.toFixed(1)}, ${this.lastForces.lines.z.toFixed(1)}) |F|=${this.lastForces.lines.length().toFixed(1)}N`);
-            console.warn(`     Total: (${totalForce.x.toFixed(1)}, ${totalForce.y.toFixed(1)}, ${totalForce.z.toFixed(1)}) |F|=${totalForce.length().toFixed(1)}N`);
-            console.warn(`     Couple: (${torque.x.toFixed(2)}, ${torque.y.toFixed(2)}, ${torque.z.toFixed(2)}) |τ|=${torque.length().toFixed(2)}N·m`);
-
-            // Logger les tensions des lignes
-            if (this.lastLineResult) {
-                console.warn(`   Lignes:`);
-                console.warn(`     Gauche: ${this.lastLineResult.leftTension.toFixed(0)}N (${this.lastLineResult.leftDistance.toFixed(2)}m)`);
-                console.warn(`     Droite: ${this.lastLineResult.rightTension.toFixed(0)}N (${this.lastLineResult.rightDistance.toFixed(2)}m)`);
-                console.warn(`     Δ Tension: ${Math.abs(this.lastLineResult.leftTension - this.lastLineResult.rightTension).toFixed(0)}N`);
-            }
-        }
-        */
+        // Ancienne logique de logging commentée...
     }
+    */
 }

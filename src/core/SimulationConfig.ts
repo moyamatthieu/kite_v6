@@ -60,7 +60,7 @@ export interface PhysicsConfig {
     dampingFactor: number; // 0-1
     maxVelocity: number; // m/s
     maxAngularVelocity: number; // rad/s
-    fixedTimeStep?: number; // s
+    fixedTimeStep?: number; // s - Pas de temps fixe pour la physique (stabilité)
 }
 
 export interface KiteConfig {
@@ -126,7 +126,20 @@ export const DEFAULT_CONFIG: SimulationConfig = {
         // ✅ La résistance vient UNIQUEMENT de la traînée aérodynamique (Cd × v²)
         maxVelocity: 30,  // m/s - Limite sécurité numérique uniquement
         maxAngularVelocity: 10,  // rad/s - Limite sécurité numérique uniquement
-        fixedTimeStep: 1/60,  // 60 FPS fixe pour stabilité intégration
+        
+        // ✅ AMÉLIORATION: Fixed timestep avec accumulation
+        // La simulation utilise un pas de temps fixe pour la physique (stabilité numérique)
+        // même si le FPS du rendu varie. Voir Simulation.ts pour implémentation.
+        // - Physique : toujours simulée par pas de 1/240s (4.17ms)
+        // - Rendu : peut être 30 FPS, 60 FPS, 144 FPS selon performance
+        // - Si FPS < 60 : plusieurs sous-pas physique par frame rendu
+        // - Si FPS > 60 : interpolation visuelle (pas de sur-simulation)
+        // 
+        // 🚀 CORRECTION STABILITÉ (recommandation Gemini) :
+        // Passage de 60 Hz (16.67ms) à 240 Hz (4.17ms) pour éliminer l'effet rebond
+        // Avec k=2000 N/m, nécessite dt < 5ms pour stabilité numérique du ressort
+        // 4 calculs physiques par frame rendue à 60 FPS, pas de surcharge significative
+        fixedTimeStep: 1/240,  // 240 Hz - Stabilité optimale pour lignes rigides (k=2000 N/m)
     },
     kite: {
         // ✅ VALEURS RÉELLES d'un cerf-volant acrobatique standard (type Revolution)
@@ -152,7 +165,18 @@ export const DEFAULT_CONFIG: SimulationConfig = {
     wind: {
         speed: 12.0,  // m/s (36 km/h) - Vent optimal pour cerf-volant acrobatique
         // Vent léger 3-5 m/s : difficile | Optimal 8-12 m/s : réactif | Fort 15+ m/s : survol
-        direction: { x: 0, y: 0, z: -1 }, // 🔧 CORRECTION: Vent va de Z+ vers Z- (souffle vers le pilote)
+        
+        // ═══════════════════════════════════════════════════════════════════════════
+        // ⚠️ SYSTÈME DE COORDONNÉES DU VENT (SOURCE UNIQUE DE VÉRITÉ)
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Le vent SOUFFLE depuis Z- (devant le pilote) vers Z+ (derrière le pilote)
+        // - Origine du vent : Z- (loin devant)
+        // - Direction : vers Z+ (pousse vers l'horizon)
+        // - Station à (0,0,0), cerf-volant en Z+ (ex: 0,8,10)
+        // - Cerf-volant REGARDE vers Z- (vers station) pour recevoir le vent de face
+        // ═══════════════════════════════════════════════════════════════════════════
+        direction: { x: 0, y: 0, z: -1 }, // Direction normalisée : vers Z-
+        
         turbulence: 0,  // Pas de turbulence pour l'instant
     },
     lines: {

@@ -88,13 +88,22 @@ export class VerletIntegrator implements IIntegrator {
         }
         
         // Intégration orientation (quaternion)
-        // ω = vitesse angulaire, θ = ω × dt
+        // ═══════════════════════════════════════════════════════════════════════════
+        // ROTATION DU CERF-VOLANT (intégration de la vitesse angulaire)
+        // ═══════════════════════════════════════════════════════════════════════════
+        // La vitesse angulaire ω (rad/s) définit l'axe et la vitesse de rotation
+        // Conversion en quaternion de rotation : Q = [cos(θ/2), sin(θ/2)×axis]
+        // avec θ = ||ω|| × dt (angle de rotation sur ce pas de temps)
+        // 
+        // Composition : orientation_new = orientation_old × delta_rotation
+        // ⚠️ CRITIQUE : Toujours normaliser après multiplication de quaternions !
+        // ═══════════════════════════════════════════════════════════════════════════
         const angle = angularSpeed * deltaTime;
         if (angle > 0.001) {
             const axis = newState.angularVelocity.clone().normalize();
             const deltaRotation = new THREE.Quaternion().setFromAxisAngle(axis, angle);
             newState.orientation = state.orientation.clone().multiply(deltaRotation);
-            // ✅ CORRECTION: Toujours normaliser après multiplication de quaternions
+            // ✅ NORMALISATION OBLIGATOIRE : évite dérive numérique (quaternions non unitaires)
             newState.orientation.normalize();
         } else {
             newState.orientation = state.orientation.clone().normalize();

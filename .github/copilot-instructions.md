@@ -94,17 +94,45 @@ private integrator = new VerletIntegrator();
 ### Système de Coordonnées (CRITIQUE)
 
 ```typescript
-// Repère : X+ droite, Y+ altitude, Z+ origine vent (souffle vers Z-)
-// Pilote à (0,0,0) regarde Z+, cerf-volant en Z+ face au vent
+// ═══════════════════════════════════════════════════════════════════════════════
+// SYSTÈME DE COORDONNÉES ET ORIENTATION (SOURCE UNIQUE DE VÉRITÉ)
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// Vent : vient de Z+, souffle vers Z- (vers pilote)
+// REPÈRE MONDE :
+// - X+ = droite (vue pilote)
+// - Y+ = altitude (haut)
+// - Z+ = "sous le vent" (derrière le pilote, vers l'horizon)
+// - Z- = "face au vent" (vers le pilote)
+
+// VENT (souffle depuis Z- vers Z+) :
+// - Origine : Z- (loin devant le pilote)
+// - Direction : vers Z+ (pousse vers l'horizon)
+// - Vecteur vélocité : (0, 0, -windSpeed) car souffle de Z- vers Z+
 windState.velocity = new THREE.Vector3(0, 0, -windSpeed);
-windState.direction = new THREE.Vector3(0, 0, -1);
+windState.direction = new THREE.Vector3(0, 0, -1); // Normalisé, vers Z-
 
-// Cerf-volant : position Z+ (ex: 0, 8, 8), face au vent
-// Orientation initiale : -15° sur X (nez bas), PAS de rotation 180° sur Y
-const orientationInitiale = new THREE.Quaternion()
-    .setFromAxisAngle(new THREE.Vector3(1, 0, 0), -15 * Math.PI / 180);
+// STATION DE PILOTAGE :
+// - Position : (0, 0, 0) = origine
+// - Treuils : (±0.5, 0, 0) de part et d'autre
+// - Regarde vers Z+ (vers le cerf-volant)
+
+// CERF-VOLANT :
+// - Position initiale : (0, 8, 10) = en Z+ à 10m du pilote, altitude 8m
+// - Regarde vers Z- (vers la station de pilotage) ← CRITIQUE !
+// - L'INTRADOS (face avant avec points de contrôle) doit faire face au vent
+// - Orientation initiale : 180° sur Y (pivot) + (-15°) sur X (angle d'attaque)
+
+// ORIENTATION INITIALE (À APPLIQUER PARTOUT) :
+// 1. Rotation 180° sur Y : fait pivoter le kite pour regarder Z-
+const rotationY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+// 2. Inclinaison -15° sur X : angle d'attaque optimal (nez légèrement bas)
+const rotationX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -15 * Math.PI / 180);
+// 3. Composition : d'abord Y (pivot), puis X (inclinaison)
+const orientation = rotationY.multiply(rotationX); // ← ORDRE IMPORTANT !
+
+// GÉOMÉTRIE DES PANNEAUX :
+// - Ordre HORAIRE des points vu de face → normales vers Z- (intrados)
+// - Les normales pointent vers la station/vent pour recevoir le vent correctement
 ```
 
 **⚠️ Intrados (face avant) DOIT recevoir le vent pour portance** (voir `CORRECTION_ORIENTATION.md`)

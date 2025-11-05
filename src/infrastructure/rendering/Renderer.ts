@@ -31,6 +31,7 @@ export interface RendererConfig {
 export class Renderer {
     private renderer: THREE.WebGLRenderer;
     private container: HTMLElement;
+    private resizeHandler: () => void;
     
     constructor(container: HTMLElement, config?: RendererConfig) {
         this.container = container;
@@ -60,8 +61,9 @@ export class Renderer {
         // Ajouter au DOM
         container.appendChild(canvas);
         
-        // Gérer redimensionnement
-        window.addEventListener('resize', () => this.handleResize());
+        // ✅ OPTIMISATION: Stocker référence au handler pour pouvoir le retirer
+        this.resizeHandler = () => this.handleResize();
+        window.addEventListener('resize', this.resizeHandler);
     }
     
     /**
@@ -93,8 +95,10 @@ export class Renderer {
     
     /**
      * Nettoie les ressources.
+     * ✅ OPTIMISATION: Retire le listener resize pour éviter fuite mémoire
      */
     dispose(): void {
+        window.removeEventListener('resize', this.resizeHandler);
         this.renderer.dispose();
         this.container.removeChild(this.renderer.domElement);
     }

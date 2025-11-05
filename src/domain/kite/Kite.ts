@@ -71,6 +71,16 @@ export class Kite {
     /**
      * Calcule la position globale d'un point de la géométrie.
      * 
+     * ═══════════════════════════════════════════════════════════════════════════
+     * TRANSFORMATION LOCALE → GLOBALE (CRITIQUE)
+     * ═══════════════════════════════════════════════════════════════════════════
+     * Ordre des transformations : 1) Rotation, 2) Translation
+     * - applyQuaternion() : applique la rotation d'orientation du cerf-volant
+     * - add() : translate vers la position globale du cerf-volant
+     * 
+     * ⚠️ Ne JAMAIS modifier cet ordre ! (standard Three.js)
+     * ═══════════════════════════════════════════════════════════════════════════
+     * 
      * @param pointName - Nom du point
      * @returns Position dans le repère global
      */
@@ -80,8 +90,8 @@ export class Kite {
         
         // Transformer du repère local au repère global
         return localPoint.clone()
-            .applyQuaternion(this.state.orientation)
-            .add(this.state.position);
+            .applyQuaternion(this.state.orientation)  // 1) Rotation
+            .add(this.state.position);                 // 2) Translation
     }
     
     /**
@@ -91,8 +101,8 @@ export class Kite {
         const localCentroid = this.geometry.getPanelCentroid(panelIndex);
         
         return localCentroid.clone()
-            .applyQuaternion(this.state.orientation)
-            .add(this.state.position);
+            .applyQuaternion(this.state.orientation)  // 1) Rotation
+            .add(this.state.position);                 // 2) Translation
     }
     
     /**
@@ -101,9 +111,10 @@ export class Kite {
     getGlobalPanelNormal(panelIndex: number): THREE.Vector3 {
         const localNormal = this.geometry.getPanelNormal(panelIndex);
         
+        // Les normales sont des vecteurs directionnels : pas de translation, juste rotation
         return localNormal.clone()
             .applyQuaternion(this.state.orientation)
-            .normalize();
+            .normalize();  // Normaliser pour garantir vecteur unitaire
     }
 }
 

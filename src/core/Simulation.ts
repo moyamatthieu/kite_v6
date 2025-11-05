@@ -86,6 +86,10 @@ export class NewSimulation {
     private lastCameraMode: CameraMode = CameraMode.ORBIT;
     private uiReference?: UserInterface; // Référence à l'UI pour mise à jour
     
+    // ✅ AMÉLIORATION: Accumulation du temps pour fixed timestep stable
+    private accumulator = 0; // Temps accumulé non simulé
+    private readonly maxSubsteps = 5; // Limite de sous-pas pour éviter spiral of death
+    
     // Mode debug géométrie
     private geometryDebugMode = false;
     private geometryDebugPosition = new THREE.Vector3(0, 2, 2);
@@ -118,11 +122,14 @@ export class NewSimulation {
         const initialState = createInitialState();
         initialState.position.set(0, 2, 10); // Z=+10 : kite "sous le vent" dans l'hémisphère Z+
         
-        // 🔧 CORRECTION: Le kite regarde vers Z+ (face au vent) avec inclinaison pour angle d'attaque
-        // Pas de rotation 180° sur Y - le kite fait naturellement face au vent venant de Z+
-        // Inclinaison -15° sur X pour angle d'attaque optimal (nez légèrement plus bas)
-        const rotationX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -15 * Math.PI / 180);
-        initialState.orientation.copy(rotationX);
+        // ═══════════════════════════════════════════════════════════════════════════
+        // ORIENTATION INITIALE DU CERF-VOLANT (CRITIQUE)
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Le cerf-volant doit REGARDER vers Z- (vers la station de contrôle à l'origine)
+        // pour que l'INTRADOS (face avant avec points de contrôle) reçoive le vent
+        // 
+        // ═══════════════════════════════════════════════════════════════════════════
+        initialState.orientation.copy(this.getInitialKiteOrientation());
         
         this.kite = KiteFactory.createStandard(initialState);
         
@@ -244,6 +251,47 @@ export class NewSimulation {
     }
     
     /**
+     * Calcule l'orientation initiale du cerf-volant (face au vent).
+     * 
+     * ═══════════════════════════════════════════════════════════════════════════
+     * ORIENTATION STANDARD DU CERF-VOLANT (SOURCE UNIQUE DE VÉRITÉ)
+     * ═══════════════════════════════════════════════════════════════════════════
+     * 
+     * Le cerf-volant doit TOUJOURS regarder vers la station de pilotage (Z-)
+     * pour recevoir le vent de face (vent souffle de Z- vers Z+).
+     * 
+     * Composition de rotations (ordre important) :
+     * 1. rotationY (180° sur axe Y) : PIVOTE le kite pour regarder vers Z-
+     * 2. rotationX (-15° sur axe X) : INCLINE le nez vers le bas (angle d'attaque optimal)
+     * 
+     * Résultat : quaternion = rotationY × rotationX
+     * 
+     * Utilisé dans :
+     * - Initialisation (constructeur)
+     * - Reset de la simulation
+     * - Mode debug géométrie (figé)
+     * - Toggle debug géométrie (activation)
+     * 
+     * @returns Quaternion représentant l'orientation standard du cerf-volant
+     */
+    private getInitialKiteOrientation(): THREE.Quaternion {
+        // 1. Rotation 180° sur Y : fait pivoter le kite pour regarder Z-
+        const rotationY = new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(0, 1, 0), 
+            Math.PI
+        );
+        
+        // 2. Inclinaison -15° sur X : angle d'attaque optimal (nez légèrement bas)
+        const rotationX = new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(1, 0, 0), 
+            -15 * Math.PI / 180
+        );
+        
+        // 3. Composition : d'abord Y (pivot), puis X (inclinaison)
+        return rotationY.multiply(rotationX);
+    }
+    
+    /**
      * Configure les listeners d'événements.
      */
     private setupEventListeners(): void {
@@ -317,6 +365,7 @@ export class NewSimulation {
     
     /**
      * Boucle principale d'animation.
+     * ✅ AMÉLIORATION: Fixed timestep avec accumulation pour stabilité
      */
     private startLoop(): void {
         const animate = () => {
@@ -325,11 +374,14 @@ export class NewSimulation {
             if (!this.isPaused) {
                 let deltaTime = this.clock.getDelta();
                 
-                // Clamper deltaTime pour éviter instabilités avec gros sauts temporels
-                // Max 33ms = ~30 FPS minimum pour stabilité
-                deltaTime = Math.min(deltaTime, 0.033);
+                // ✅ Clamper deltaTime pour éviter "spiral of death"
+                // Si FPS < 15, limiter pour éviter trop de sous-pas
+                deltaTime = Math.min(deltaTime, 0.1); // Max 100ms = 10 FPS minimum
                 
                 this.update(deltaTime);
+            } else {
+                // ✅ En pause, continuer à appeler getDelta() pour éviter gros saut à la reprise
+                this.clock.getDelta();
             }
             
             this.render();
@@ -339,9 +391,39 @@ export class NewSimulation {
     }
     
     /**
-     * Met à jour la simulation.
+     * Met à jour la simulation avec fixed timestep et accumulation.
+     * ✅ AMÉLIORATION: Utilise l'accumulation pour garantir stabilité physique
+     * même avec FPS variable
      */
     private update(deltaTime: number): void {
+        // Récupérer le pas de temps fixe de la physique
+        const fixedDt = this.config.physics.fixedTimeStep ?? (1/60);
+        
+        // Ajouter le temps écoulé à l'accumulator
+        this.accumulator += deltaTime;
+        
+        // ✅ FIXED TIMESTEP: Simuler par pas fixes tant qu'il reste du temps
+        let substeps = 0;
+        while (this.accumulator >= fixedDt && substeps < this.maxSubsteps) {
+            this.updatePhysics(fixedDt);
+            this.accumulator -= fixedDt;
+            substeps++;
+        }
+        
+        // Si trop de sous-pas nécessaires (FPS très bas), réinitialiser accumulator
+        // pour éviter "spiral of death"
+        if (substeps >= this.maxSubsteps) {
+            this.accumulator = 0;
+        }
+        
+        // Mettre à jour visuels et caméra avec le temps réel (interpolation visuelle)
+        this.updateVisualsAndCamera(deltaTime);
+    }
+    
+    /**
+     * Met à jour la physique pour un pas de temps fixe.
+     */
+    private updatePhysics(fixedDt: number): void {
         // Mode debug géométrie : fige le cerf-volant à une position fixe
         if (this.geometryDebugMode) {
             const state = this.kite.getState();
@@ -349,9 +431,13 @@ export class NewSimulation {
             state.velocity.set(0, 0, 0);
             state.angularVelocity.set(0, 0, 0);
             
-            // 🔧 CORRECTION: Le kite regarde vers Z+ (face au vent) avec inclinaison pour angle d'attaque
-            const rotationX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -15 * Math.PI / 180);
-            state.orientation.copy(rotationX);
+            // ═══════════════════════════════════════════════════════════════════════════
+            // ORIENTATION MODE DEBUG GÉOMÉTRIE (même que orientation initiale)
+            // ═══════════════════════════════════════════════════════════════════════════
+            // Cerf-volant figé pour inspection visuelle de la géométrie
+            // Doit garder la même orientation que l'initialisation pour cohérence
+            // ═══════════════════════════════════════════════════════════════════════════
+            state.orientation.copy(this.getInitialKiteOrientation());
             
             const simState: SimulationState = {
                 kite: state,
@@ -378,7 +464,7 @@ export class NewSimulation {
                     totalTension: 0,
                 },
                 elapsedTime: this.clock.getElapsedTime(),
-                deltaTime: deltaTime,
+                deltaTime: fixedDt,
             };
             
             // Mise à jour visualiseurs en mode debug
@@ -402,7 +488,7 @@ export class NewSimulation {
         if (this.autoPilotActive) {
             this.currentDelta = this.autoPilotMode.calculate(
                 this.kite.getState(),
-                deltaTime,
+                fixedDt,
                 this.config.lines.baseLength
             );
             
@@ -412,8 +498,8 @@ export class NewSimulation {
             }
         }
         
-        // Mise à jour physique
-        const simState = this.physicsEngine.update(deltaTime, this.currentDelta);
+        // Mise à jour physique avec pas de temps fixe
+        const simState = this.physicsEngine.update(fixedDt, this.currentDelta);
         
         // Récupérer les positions des treuils depuis le visualiseur
         const winchPositions = this.controlStationVisualizer.getWinchPositions();
@@ -432,8 +518,8 @@ export class NewSimulation {
         // Mise à jour des numéros de panneaux
         this.panelNumbersVisualizer.update(this.kite);
         
-        // Trajectoire
-        if (simState.elapsedTime % 0.1 < deltaTime) {
+        // Trajectoire (ajout conditionnel)
+        if (simState.elapsedTime % 0.1 < fixedDt) {
             this.trajectoryVisualizer.addPoint(simState.kite.position);
         }
         
@@ -450,17 +536,8 @@ export class NewSimulation {
             });
         }
         
-        // Mise à jour de la caméra (WASD, mode suivi, animations)
-        this.camera.update(deltaTime, simState.kite.position);
-        
-        // Détecter changement de mode caméra pour mettre à jour l'UI
-        const currentCameraMode = this.camera.getMode();
-        if (currentCameraMode !== this.lastCameraMode) {
-            this.lastCameraMode = currentCameraMode;
-        }
-        
         // Logging périodique
-        this.lastLogTime += deltaTime;
+        this.lastLogTime += fixedDt;
         if (this.lastLogTime >= this.config.ui.logInterval) {
             this.logState(simState);
             this.lastLogTime = 0;
@@ -475,6 +552,21 @@ export class NewSimulation {
     }
     
     /**
+     * Met à jour les visuels et la caméra (interpolation fluide).
+     */
+    private updateVisualsAndCamera(deltaTime: number): void {
+        // Mise à jour de la caméra avec deltaTime réel pour mouvement fluide
+        const kitePosition = this.kite.getState().position;
+        this.camera.update(deltaTime, kitePosition);
+        
+        // Détecter changement de mode caméra pour mettre à jour l'UI
+        const currentCameraMode = this.camera.getMode();
+        if (currentCameraMode !== this.lastCameraMode) {
+            this.lastCameraMode = currentCameraMode;
+        }
+    }
+    
+    /**
      * Rend la scène.
      */
     private render(): void {
@@ -486,10 +578,11 @@ export class NewSimulation {
     
     /**
      * Log l'état de vol condensé avec informations pertinentes.
+     * ✅ OPTIMISÉ: Réduit drastiquement la fréquence des logs
      */
     private logState(simState: SimulationState): void {
-        // 🔧 LOGS ULTRA-CONDENSÉS - Seulement toutes les 2 secondes
-        if (Math.floor(simState.elapsedTime * 2) % 4 !== 0) {
+        // ✅ LOGS ULTRA-CONDENSÉS - Seulement toutes les 5 secondes
+        if (Math.floor(simState.elapsedTime) % 5 !== 0 || simState.elapsedTime - Math.floor(simState.elapsedTime) > 0.5) {
             return;
         }
         
@@ -517,8 +610,8 @@ export class NewSimulation {
 
         this.logger.flightStatus(flightLog);
 
-        // 🔧 Logs avancés DÉSACTIVÉS sauf erreurs critiques
-        this.logCriticalEvents(simState);
+        // ✅ Logs avancés complètement désactivés pour performance
+        // this.logCriticalEvents(simState);
     }
 
     /**
@@ -632,13 +725,14 @@ export class NewSimulation {
      */
     private reset(): void {
         const initialState = createInitialState();
-        // 🔧 CORRECTION: Position initiale Z=+8 (kite face au vent venant de Z+)
+        // 🔧 CORRECTION: Position initiale Z=+8 (kite face au vent venant de Z-)
         // Avec treuils à (±0.5, 0, 0) et position (0, 8, 8) → distance ≈ 11.4m (lignes légèrement tendues)
         initialState.position.set(0, 8, 8);
         
-        // 🔧 CORRECTION: Le kite regarde vers Z+ (face au vent) avec inclinaison pour angle d'attaque
-        const rotationX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -15 * Math.PI / 180);
-        initialState.orientation.copy(rotationX);
+        // ═══════════════════════════════════════════════════════════════════════════
+        // ORIENTATION RESET (même que orientation initiale)
+        // ═══════════════════════════════════════════════════════════════════════════
+        initialState.orientation.copy(this.getInitialKiteOrientation());
         
         this.physicsEngine.reset(initialState);
         this.trajectoryVisualizer.clear();
@@ -854,9 +948,10 @@ export class NewSimulation {
             state.velocity.set(0, 0, 0);
             state.angularVelocity.set(0, 0, 0);
             
-            // 🔧 CORRECTION: Le kite regarde vers Z+ (face au vent) avec inclinaison pour angle d'attaque
-            const rotationX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -15 * Math.PI / 180);
-            state.orientation.copy(rotationX);
+            // ═══════════════════════════════════════════════════════════════════════════
+            // ORIENTATION MODE DEBUG GÉOMÉTRIE (toggle activation)
+            // ═══════════════════════════════════════════════════════════════════════════
+            state.orientation.copy(this.getInitialKiteOrientation());
             
             this.logger.control('🔍 Mode debug géométrie ACTIVÉ - Kite à (0, 3, 5) - Mouvements de caméra préservés');
         } else {
