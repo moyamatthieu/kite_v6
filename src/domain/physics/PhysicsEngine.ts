@@ -174,35 +174,54 @@ export class PhysicsEngine {
             this.kite.properties.mass
         );
 
-        // 4. CONTRAINTE DE COLLISION AVEC LE SOL
-        // Le cerf-volant ne peut pas traverser le sol (Y < 0)
+        // 4. CONTRAINTE DE COLLISION AVEC LE SOL (SIMPLIFIÉE ET ROBUSTE)
+        // ═══════════════════════════════════════════════════════════════════════════
+        // GESTION PHYSIQUE SIMPLE DES COLLISIONS
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Détection géométrique : on vérifie le point le plus bas du cerf-volant
+        // Si pénétration → correction de position + rebond élastique
+        // ═══════════════════════════════════════════════════════════════════════════
         const groundLevel = 0;
-        const groundEpsilon = 0.1; // Marge de sécurité pour éviter vibrations numériques
+        const lowestPointNew = this.kite.getLowestPoint(newState);
         
-        if (newState.position.y <= groundLevel + groundEpsilon) {
-            // Forcer la position légèrement au-dessus du sol pour éviter les vibrations
-            newState.position.y = groundLevel + groundEpsilon;
+        if (lowestPointNew.altitude < groundLevel) {
+            // Le point le plus bas est sous le sol → collision détectée
             
-            // DAMPING MODÉRÉ pour permettre glissement au sol
+            // 1. CORRECTION DE POSITION : Remonter le kite pour que le point bas soit à Y=0
+            const penetrationDepth = groundLevel - lowestPointNew.altitude;
+            newState.position.y += penetrationDepth;
             
-            // 1. Annuler complètement la vélocité verticale
-            newState.velocity.y = 0;
+            // 2. REBOND ÉLASTIQUE (coefficient de restitution)
+            // Un cerf-volant en toile ne rebondit presque pas (≈ sac de tissu)
+            const restitution = 0.15; // 15% d'énergie conservée (très mou)
             
-            // 2. Friction légère au sol (le cerf-volant peut glisser)
-            const groundFriction = 0.85; // 🔧 RÉDUIT: garde 85% de la vitesse horizontale (friction légère)
+            if (newState.velocity.y < 0) {
+                // Inverser composante verticale avec perte d'énergie
+                newState.velocity.y = -newState.velocity.y * restitution;
+            } else {
+                // Si montait déjà, simplement annuler vélocité verticale
+                newState.velocity.y = 0;
+            }
+            
+            // 3. FRICTION AU SOL (glissement avec résistance)
+            // Le cerf-volant peut glisser au sol mais avec friction modérée
+            const groundFriction = 0.85; // Perd 15% de vitesse horizontale par frame
             newState.velocity.x *= groundFriction;
             newState.velocity.z *= groundFriction;
             
-            // 3. Damper modérément les rotations (stabilisation douce au sol)
-            const rotationDamping = 0.5; // 🔧 AUGMENTÉ: garde 50% de la rotation (0.1 → 0.5)
+            // 4. DAMPING DES ROTATIONS (stabilisation progressive)
+            // Le contact au sol freine les rotations par frottement
+            const rotationDamping = 0.70; // Perd 30% de vitesse angulaire par frame
             newState.angularVelocity.multiplyScalar(rotationDamping);
             
-            // 4. Si les vélocités sont quasi-nulles, les mettre à zéro pour arrêt complet
-            const velocityThreshold = 0.01; // m/s
+            // 5. ARRÊT COMPLET si quasi-immobile (pour éviter vibrations infinies)
+            const velocityThreshold = 0.1; // m/s
+            const angularThreshold = 0.05; // rad/s
+            
             if (Math.abs(newState.velocity.x) < velocityThreshold) newState.velocity.x = 0;
+            if (Math.abs(newState.velocity.y) < velocityThreshold) newState.velocity.y = 0;
             if (Math.abs(newState.velocity.z) < velocityThreshold) newState.velocity.z = 0;
             
-            const angularThreshold = 0.001; // rad/s
             if (Math.abs(newState.angularVelocity.x) < angularThreshold) newState.angularVelocity.x = 0;
             if (Math.abs(newState.angularVelocity.y) < angularThreshold) newState.angularVelocity.y = 0;
             if (Math.abs(newState.angularVelocity.z) < angularThreshold) newState.angularVelocity.z = 0;

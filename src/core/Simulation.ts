@@ -28,6 +28,7 @@ import {
     LinesVisualizer, 
     TrajectoryVisualizer, 
     DebugVisualizer,
+    PanelForceVisualizer,
     ControlStationVisualizer,
     GeometryLabelsVisualizer,
     PanelNumbersVisualizer
@@ -71,6 +72,7 @@ export class NewSimulation {
     private linesVisualizer: LinesVisualizer;
     private trajectoryVisualizer: TrajectoryVisualizer;
     private debugVisualizer: DebugVisualizer;
+    private panelForceVisualizer: PanelForceVisualizer;
     private controlStationVisualizer: ControlStationVisualizer;
     private geometryLabelsVisualizer: GeometryLabelsVisualizer;
     private panelNumbersVisualizer: PanelNumbersVisualizer;
@@ -93,6 +95,11 @@ export class NewSimulation {
     // Mode debug géométrie
     private geometryDebugMode = false;
     private geometryDebugPosition = new THREE.Vector3(0, 2, 2);
+    
+    // Mode debug portance
+    private liftDebugMode = false;
+    private liftDebugPosition = new THREE.Vector3(0, 5, 10);
+    private liftDebugOrientation = new THREE.Quaternion();
     
     constructor(container: HTMLElement, config?: Partial<SimulationConfig>) {
         this.config = { ...DEFAULT_CONFIG, ...config };
@@ -120,7 +127,7 @@ export class NewSimulation {
         
         // 3. Initialiser domaine
         const initialState = createInitialState();
-        initialState.position.set(0, 2, 10); // Z=+10 : kite "sous le vent" dans l'hémisphère Z+
+        initialState.position.set(0, 8, 10); // Z=+10 : kite "sous le vent" dans l'hémisphère Z+
         
         // ═══════════════════════════════════════════════════════════════════════════
         // ORIENTATION INITIALE DU CERF-VOLANT (CRITIQUE)
@@ -161,14 +168,14 @@ export class NewSimulation {
         ));
         
         // Créer le PhysicsEngine d'abord (sans lineCalculator pour l'instant)
-        // 🔧 CORRECTION: Le vent va de Z+ vers Z- (souffle vers le pilote, frappe l'intrados du kite)
+        // ✅ CORRECTION: Le vent souffle de Z- vers Z+ (pousse le kite vers l'horizon)
         this.physicsEngine = new PhysicsEngine(
             this.kite,
             integrator,
             forceManager,
             {
-                velocity: new THREE.Vector3(0, 0, -this.config.wind.speed), // Vent vers Z-
-                direction: new THREE.Vector3(0, 0, -1), // Direction vers Z-
+                velocity: new THREE.Vector3(0, 0, this.config.wind.speed), // Vent vers Z+
+                direction: new THREE.Vector3(0, 0, 1), // Direction vers Z+
                 speed: this.config.wind.speed,
                 turbulence: this.config.wind.turbulence,
             },
@@ -183,6 +190,7 @@ export class NewSimulation {
         this.linesVisualizer = new LinesVisualizer();
         this.trajectoryVisualizer = new TrajectoryVisualizer();
         this.debugVisualizer = new DebugVisualizer();
+        this.panelForceVisualizer = new PanelForceVisualizer();
         this.controlStationVisualizer = new ControlStationVisualizer();
         this.geometryLabelsVisualizer = new GeometryLabelsVisualizer();
         this.panelNumbersVisualizer = new PanelNumbersVisualizer();
@@ -228,12 +236,14 @@ export class NewSimulation {
         this.linesVisualizer.getObjects().forEach(line => this.scene.add(line));
         this.scene.add(this.trajectoryVisualizer.getObject());
         this.scene.add(this.debugVisualizer.getObject());
+        this.scene.add(this.panelForceVisualizer.getObject());
         this.scene.add(this.controlStationVisualizer.getObject3D());
         this.scene.add(this.geometryLabelsVisualizer.getObject());
         this.scene.add(this.panelNumbersVisualizer.getObject());
         
         // Configurer visibilité debug
         this.debugVisualizer.setVisible(this.config.rendering.showDebug);
+        this.panelForceVisualizer.setVisible(false); // Invisible par défaut, activé en mode debug portance
         this.panelNumbersVisualizer.setVisible(true); // Visible par défaut
         
         // 6. Configurer événements
@@ -248,6 +258,41 @@ export class NewSimulation {
         // 9. Démarrer boucle
         this.logger.info('🪁 Nouvelle simulation initialisée !');
         this.startLoop();
+    }
+    
+    /**
+     * Calcule l'orientation pour le mode debug portance (45° vers l'avant).
+     * 
+     * ═══════════════════════════════════════════════════════════════════════════
+     * ORIENTATION MODE DEBUG PORTANCE
+     * ═══════════════════════════════════════════════════════════════════════════
+     * 
+     * Le cerf-volant doit TOUJOURS regarder vers la station de pilotage (Z-)
+     * avec une inclinaison de 45° vers l'avant pour tester l'orientation des forces.
+     * 
+     * Composition de rotations (ordre important) :
+     * 1. rotationY (180° sur axe Y) : PIVOTE le kite pour regarder vers Z-
+     * 2. rotationX (+45° sur axe X) : INCLINE le nez vers l'avant de 45°
+     * 
+     * Résultat : quaternion = rotationY × rotationX
+     * 
+     * @returns Quaternion représentant l'orientation debug portance (45° vers l'avant)
+     */
+    private getLiftDebugOrientation(): THREE.Quaternion {
+        // 1. Rotation 180° sur Y : fait pivoter le kite pour regarder Z-
+        const rotationY = new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(0, 1, 0), 
+            Math.PI
+        );
+        
+        // 2. Inclinaison +45° sur X : angle vers l'avant (nez vers le bas)
+        const rotationX = new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(1, 0, 0), 
+            +45 * Math.PI / 180
+        );
+        
+        // 3. Composition : d'abord Y (pivot), puis X (inclinaison)
+        return rotationY.multiply(rotationX);
     }
     
     /**
@@ -303,9 +348,8 @@ export class NewSimulation {
             this.isPaused = false;
         });
         
-        this.eventBus.subscribe(SimulationEventType.SIMULATION_RESET, () => {
-            this.reset();
-        });
+        // ⚠️ SIMULATION_RESET listener retiré pour éviter boucle infinie
+        // Le reset est appelé directement depuis l'UI via simulation.reset()
     }
     
     /**
@@ -442,8 +486,8 @@ export class NewSimulation {
             const simState: SimulationState = {
                 kite: state,
                 wind: {
-                    velocity: new THREE.Vector3(0, 0, -this.config.wind.speed), // Vent vers Z-
-                    direction: new THREE.Vector3(0, 0, -1), // Direction vers Z-
+                    velocity: new THREE.Vector3(0, 0, this.config.wind.speed), // Vent vers Z+
+                    direction: new THREE.Vector3(0, 0, 1), // Direction vers Z+
                     speed: this.config.wind.speed,
                     turbulence: 0,
                 },
@@ -467,7 +511,7 @@ export class NewSimulation {
                 deltaTime: fixedDt,
             };
             
-            // Mise à jour visualiseurs en mode debug
+            // Mise à jour visualiseurs en mode debug géométrie
             const winchPositions = this.controlStationVisualizer.getWinchPositions();
             this.kiteVisualizer.update();
             this.linesVisualizer.update(winchPositions.left, winchPositions.right, this.kite);
@@ -483,6 +527,71 @@ export class NewSimulation {
             return;
         }
         
+        // Mode debug portance : fige le cerf-volant mais calcule les forces
+        if (this.liftDebugMode) {
+            const state = this.kite.getState();
+            
+            // Calculer les forces aérodynamiques, de gravité et de lignes normalement
+            const simState = this.physicsEngine.update(fixedDt, this.currentDelta);
+            
+            // Mais forcer la position et l'orientation fixes
+            state.position.copy(this.liftDebugPosition);
+            state.velocity.set(0, 0, 0);
+            state.angularVelocity.set(0, 0, 0);
+            state.orientation.copy(this.liftDebugOrientation);
+            
+            // Mettre à jour l'état figé dans le kite
+            this.kite.setState(state);
+            
+            // Créer un état de simulation avec les forces calculées mais position figée
+            const fixedSimState: SimulationState = {
+                ...simState,
+                kite: state, // État figé
+            };
+            
+            // Récupérer les positions des treuils depuis le visualiseur
+            const winchPositions = this.controlStationVisualizer.getWinchPositions();
+            
+            // Mise à jour visualiseurs
+            this.kiteVisualizer.update();
+            this.linesVisualizer.update(
+                winchPositions.left,
+                winchPositions.right,
+                this.kite
+            );
+            
+            // Mise à jour des labels de géométrie
+            this.geometryLabelsVisualizer.update(this.kite, this.controlStationVisualizer);
+            
+            // Mise à jour des numéros de panneaux
+            this.panelNumbersVisualizer.update(this.kite);
+            
+            // Mode debug portance : afficher forces par panneau au lieu du debug standard
+            this.debugVisualizer.setVisible(false);
+            this.panelForceVisualizer.setVisible(true);
+            this.panelForceVisualizer.updatePanelForces(
+                this.kite,
+                fixedSimState.kite,
+                fixedSimState.wind,
+                fixedSimState.forces.gravity
+            );
+            
+            // Logging périodique
+            this.lastLogTime += fixedDt;
+            if (this.lastLogTime >= this.config.ui.logInterval) {
+                this.logState(fixedSimState);
+                this.lastLogTime = 0;
+            }
+            
+            // Publier événement
+            this.eventBus.publish({
+                type: SimulationEventType.PHYSICS_UPDATE,
+                timestamp: Date.now(),
+                data: fixedSimState,
+            });
+            return;
+        }
+
         // Mode normal : physique active
         // Appliquer autopilote si actif
         if (this.autoPilotActive) {
@@ -721,30 +830,79 @@ export class NewSimulation {
     };
     
     /**
-     * Réinitialise la simulation.
+     * Réinitialise la simulation (méthode publique pour l'UI).
      */
-    private reset(): void {
-        const initialState = createInitialState();
-        // 🔧 CORRECTION: Position initiale Z=+8 (kite face au vent venant de Z-)
-        // Avec treuils à (±0.5, 0, 0) et position (0, 8, 8) → distance ≈ 11.4m (lignes légèrement tendues)
-        initialState.position.set(0, 8, 8);
-        
-        // ═══════════════════════════════════════════════════════════════════════════
-        // ORIENTATION RESET (même que orientation initiale)
-        // ═══════════════════════════════════════════════════════════════════════════
-        initialState.orientation.copy(this.getInitialKiteOrientation());
-        
-        this.physicsEngine.reset(initialState);
-        this.trajectoryVisualizer.clear();
-        this.currentDelta = 0;
-        this.clock = new THREE.Clock();
-        this.lastLogTime = 0;
-        
-        if (this.autoPilotMode) {
-            this.autoPilotMode.reset();
+    public reset(): void {
+        try {
+            console.log('🔄 [RESET] Démarrage du reset...');
+            
+            // Désactiver tous les modes debug AVANT de réinitialiser la physique
+            const wasInLiftDebug = this.liftDebugMode;
+            const wasInGeometryDebug = this.geometryDebugMode;
+            
+            if (this.liftDebugMode) {
+                this.liftDebugMode = false;
+                this.panelForceVisualizer.setVisible(false);
+                console.log('🔄 [RESET] Mode debug portance désactivé');
+            }
+            
+            if (this.geometryDebugMode) {
+                this.geometryDebugMode = false;
+                console.log('🔄 [RESET] Mode debug géométrie désactivé');
+            }
+            
+            // Rétablir le visualiseur debug standard si configuré
+            if (this.config.rendering.showDebug) {
+                this.debugVisualizer.setVisible(true);
+            }
+            
+            const initialState = createInitialState();
+            // ✅ CORRECTION: Position initiale Z=+10, Y=8
+            initialState.position.set(0, 8, 10);
+            console.log('🔄 [RESET] Position initiale définie:', initialState.position);
+            // ═══════════════════════════════════════════════════════════════════════════
+            // ORIENTATION RESET (même que orientation initiale)
+            // ═══════════════════════════════════════════════════════════════════════════
+            initialState.orientation.copy(this.getInitialKiteOrientation());
+            console.log('🔄 [RESET] Orientation définie');
+            this.physicsEngine.reset(initialState);
+            console.log('🔄 [RESET] PhysicsEngine réinitialisé');
+            this.trajectoryVisualizer.clear();
+            console.log('🔄 [RESET] Trajectoire effacée');
+            this.currentDelta = 0;
+            this.clock = new THREE.Clock();
+            this.lastLogTime = 0;
+            this.accumulator = 0; // Réinitialiser l'accumulator aussi
+            console.log('🔄 [RESET] State interne réinitialisé');
+            if (this.autoPilotMode) {
+                this.autoPilotMode.reset();
+                console.log('🔄 [RESET] Mode autopilote réinitialisé');
+            }
+            // Remettre le slider UI à zéro
+            if (this.uiReference) {
+                this.uiReference.updateControlSlider(0);
+                console.log('🔄 [RESET] Slider UI réinitialisé');
+            }
+            
+            // Logger les changements de modes debug
+            if (wasInLiftDebug || wasInGeometryDebug) {
+                this.logger.info('🔄 Modes debug désactivés lors du reset');
+            }
+            this.logger.info('🔄 Simulation réinitialisée');
+            console.log('🔄 [RESET] Logger notifié');
+            
+            // ⚠️ NE PAS publier l'événement SIMULATION_RESET ici pour éviter boucle infinie
+            // L'événement est écouté dans setupEventListeners() et rappelle reset()
+            // Si besoin de notifier d'autres composants, utiliser un événement différent
+            
+            console.log('🔄 [RESET] ✅ Reset terminé avec succès');
+        } catch (e) {
+            console.error('❌ [RESET] Erreur critique lors du reset :', e);
+            if (this.logger) {
+                this.logger.error('❌ Erreur critique lors du reset : ' + (e as Error).message);
+            }
+            alert('Erreur critique lors du reset : ' + (e as Error).message);
         }
-        
-        this.logger.info('🔄 Simulation réinitialisée');
     }
     
     /**
@@ -799,6 +957,7 @@ export class NewSimulation {
         this.linesVisualizer.dispose();
         this.trajectoryVisualizer.dispose();
         this.debugVisualizer.dispose();
+        this.panelForceVisualizer.dispose();
         this.controlStationVisualizer.dispose();
         this.geometryLabelsVisualizer.dispose();
         this.panelNumbersVisualizer.dispose();
@@ -928,6 +1087,54 @@ export class NewSimulation {
     }
     
     /**
+     * Active/désactive le mode debug portance.
+     * En mode debug portance, le cerf-volant est figé à la position (0, 5, 10) 
+     * avec une inclinaison de 45° vers l'avant pour tester l'orientation des forces.
+     * Les forces aérodynamiques, de gravité et de lignes sont calculées normalement 
+     * mais le cerf-volant reste immobile.
+     */
+    public toggleLiftDebug(): void {
+        this.liftDebugMode = !this.liftDebugMode;
+        
+        if (this.liftDebugMode) {
+            // Calculer l'orientation debug portance (45° vers l'avant)
+            this.liftDebugOrientation.copy(this.getLiftDebugOrientation());
+            
+            // Positionner le kite à (0, 5, 10) pour debug portance
+            this.liftDebugPosition.set(0, 5, 10);
+            
+            // Forcer immédiatement la position et l'orientation du kite
+            const state = this.kite.getState();
+            state.position.copy(this.liftDebugPosition);
+            state.velocity.set(0, 0, 0);
+            state.angularVelocity.set(0, 0, 0);
+            state.orientation.copy(this.liftDebugOrientation);
+            
+            // Activer le visualiseur de forces par panneau
+            this.panelForceVisualizer.setVisible(true);
+            this.debugVisualizer.setVisible(false);
+            
+            // Désactiver le mode debug géométrie si actif
+            if (this.geometryDebugMode) {
+                this.geometryDebugMode = false;
+                this.logger.control('🔍 Mode debug géométrie DÉSACTIVÉ (remplacé par debug portance)');
+            }
+            
+            this.logger.control('🪁 Mode debug PORTANCE ACTIVÉ - Kite figé à (0, 5, 10) avec inclinaison 45° - Forces par panneau');
+        } else {
+            // Désactiver le visualiseur de forces par panneau
+            this.panelForceVisualizer.setVisible(false);
+            
+            // Rétablir l'affichage debug standard si activé dans config
+            if (this.config.rendering.showDebug) {
+                this.debugVisualizer.setVisible(true);
+            }
+            
+            this.logger.control('🪁 Mode debug PORTANCE DÉSACTIVÉ');
+        }
+    }
+    
+    /**
      * Active/désactive le mode debug géométrie.
      * En mode debug, le cerf-volant est figé à la position (0, 2, 2).
      * Les mouvements de caméra restent possibles - le mode de caméra de l'utilisateur est préservé.
@@ -952,6 +1159,12 @@ export class NewSimulation {
             // ORIENTATION MODE DEBUG GÉOMÉTRIE (toggle activation)
             // ═══════════════════════════════════════════════════════════════════════════
             state.orientation.copy(this.getInitialKiteOrientation());
+            
+            // Désactiver le mode debug portance si actif
+            if (this.liftDebugMode) {
+                this.liftDebugMode = false;
+                this.logger.control('🪁 Mode debug portance DÉSACTIVÉ (remplacé par debug géométrie)');
+            }
             
             this.logger.control('🔍 Mode debug géométrie ACTIVÉ - Kite à (0, 3, 5) - Mouvements de caméra préservés');
         } else {
@@ -992,10 +1205,10 @@ export class NewSimulation {
     public setWindSpeed(speed: number): void {
         this.config.wind.speed = speed;
         
-        // 🔧 CORRECTION: Le vent va de Z+ vers Z- (souffle vers le pilote)
+        // ✅ CORRECTION: Le vent souffle de Z- vers Z+ (pousse le kite vers l'horizon)
         this.physicsEngine.setWindState({
-            velocity: new THREE.Vector3(0, 0, -speed), // Vent vers Z-
-            direction: new THREE.Vector3(0, 0, -1), // Direction vers Z-
+            velocity: new THREE.Vector3(0, 0, speed), // Vent vers Z+
+            direction: new THREE.Vector3(0, 0, 1), // Direction vers Z+
             speed: speed,
             turbulence: this.config.wind.turbulence,
         });

@@ -55,25 +55,30 @@ function bootstrap() {
         container,
         {
             onReset: () => {
-                simulation['reset']();
+                console.log('🔄 [UI] Callback onReset appelé');
+                simulation.reset();
+                console.log('🔄 [UI] Callback onReset terminé');
             },
             onPause: () => {
-                const isPaused = simulation['isPaused'];
-                if (isPaused) {
-                    simulation['resume']();
+                // Toggle pause/resume
+                const currentState = (window as any).__simulationPaused || false;
+                if (currentState) {
+                    simulation.resume();
+                    (window as any).__simulationPaused = false;
                 } else {
-                    simulation['pause']();
+                    simulation.pause();
+                    (window as any).__simulationPaused = true;
                 }
             },
             onSimulationPause: (paused) => {
                 if (paused) {
-                    simulation['pause']();
+                    simulation.pause();
                 } else {
-                    simulation['resume']();
+                    simulation.resume();
                 }
             },
             onWindChange: (speed) => {
-                simulation['setWindSpeed'](speed);
+                simulation.setWindSpeed(speed);
             },
             onLineLengthChange: (length) => {
                 ui.addLog(`📏 Longueur lignes: ${length} m`, 'info');
@@ -85,22 +90,25 @@ function bootstrap() {
                 // TODO: Implémenter changement bride dynamique
             },
             onAutoPilotToggle: (enabled) => {
-                simulation['setAutoPilotActive'](enabled);
+                simulation.setAutoPilotActive(enabled);
             },
             onAutoPilotModeChange: (mode) => {
-                simulation['setAutoPilotMode'](mode);
+                simulation.setAutoPilotMode(mode);
             },
             onControlDeltaChange: (delta) => {
-                simulation['setControlDelta'](delta);
+                simulation.setControlDelta(delta);
             },
             onGeometryDebugToggle: () => {
-                simulation['toggleGeometryDebug']();
+                simulation.toggleGeometryDebug();
+            },
+            onLiftDebugToggle: () => {
+                simulation.toggleLiftDebug();
             },
             onForceVectorsToggle: () => {
-                simulation['toggleForceVectors']();
+                simulation.toggleForceVectors();
             },
             onPanelNumbersToggle: () => {
-                simulation['togglePanelNumbers']();
+                simulation.togglePanelNumbers();
             },
         }
     );
@@ -108,7 +116,7 @@ function bootstrap() {
     // Initialiser les valeurs de l'UI depuis la config (plus de vent/longueur/brides car simplifiés)
     
     // Connecter l'UI à la simulation pour les mises à jour automatiques
-    simulation['setUIReference'](ui);
+    simulation.setUIReference(ui);
 
     // Connecter le Logger de la simulation à l'UI
     const logger = simulation.getLogger();

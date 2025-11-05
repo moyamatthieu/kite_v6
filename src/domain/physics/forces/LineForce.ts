@@ -183,13 +183,35 @@ export class LineForceCalculator implements ILineForceCalculator {
         
         let tension = 0;
         
-        // ✅ CORRECTION PHYSIQUE CRITIQUE: Le fil ne peut que TIRER, jamais POUSSER
-        // Un fil mou (slack) a une tension = 0 Newton (pas de minTension artificielle)
-        // Ceci permet la chute libre quand le vent cesse
-        if (currentDistance <= restLength) {
-            // Régime SLACK : Ligne détendue ou à longueur de repos → Tension nulle
-            // Le cerf-volant peut tomber librement sous l'effet de la gravité
+        // 🔧 CORRECTION PHYSIQUE CRITIQUE : Modèle réaliste des lignes
+        // 
+        // PRINCIPE : Un fil peut TIRER mais pas POUSSER
+        // - Si ligne détendue (L < L_repos) : tension = 0 (chute libre autorisée)
+        // - Si ligne tendue (L ≥ L_repos) : tension selon modèle ressort-amortisseur
+        // 
+        // CORRECTION IMPORTANTE : Tension minimale de 0.5N même en slack léger
+        // pour maintenir une contrainte géométrique faible (évite dérive totale)
+        // Cette tension résiduelle simule :
+        // - La masse propre des lignes (qui pendent entre treuil et kite)
+        // - La friction de l'air sur les lignes
+        // - Les micro-tensions dues aux vibrations
+        //
+        // Cela permet au cerf-volant de :
+        // ✅ Tomber sous l'effet de la gravité (force dominante)
+        // ✅ Ressentir le vent apparent pendant la chute (forces aéro actives)
+        // ✅ Rester dans l'hémisphère de vol (pas de dérive infinie)
+        
+        const slackTolerance = 0.05; // 5cm de tolérance avant tension résiduelle
+        
+        if (currentDistance < restLength - slackTolerance) {
+            // Régime SLACK COMPLET : Ligne vraiment détendue → Tension nulle
+            // Le cerf-volant tombe librement
             tension = 0;
+        } else if (currentDistance < restLength + 0.01) {
+            // Régime TRANSITION : Proche de la longueur de repos
+            // Tension résiduelle faible (masse des lignes, friction air)
+            const proximityFactor = (currentDistance - (restLength - slackTolerance)) / (slackTolerance + 0.01);
+            tension = this.config.minTension * Math.max(0, Math.min(1, proximityFactor));
         } else {
             // Régime TENDU : Ligne étirée - Modèle HYBRIDE Linéaire-Exponentiel
             const extension = currentDistance - restLength;
@@ -201,20 +223,22 @@ export class LineForceCalculator implements ILineForceCalculator {
             let springForce: number;
             
             if (extension < this.config.exponentialThreshold) {
-                // Zone linéaire
+                // Zone linéaire : F = k × x
                 springForce = this.config.stiffness * extension;
             } else {
-                // Zone exponentielle
+                // Zone exponentielle : Protection contre sur-étirement
                 const thresholdForce = this.config.stiffness * this.config.exponentialThreshold;
                 const excessExtension = extension - this.config.exponentialThreshold;
                 const expTerm = Math.exp(this.config.exponentialRate * excessExtension) - 1;
                 springForce = this.config.exponentialStiffness * expTerm + thresholdForce;
             }
             
+            // Amortissement : F_damp = c × v
             const dampingForce = this.config.damping * radialVelocity;
             
             tension = springForce + dampingForce;
-            tension = Math.max(0, tension);
+            // Ajouter tension minimale (masse lignes + friction)
+            tension = Math.max(this.config.minTension, tension);
         }
         
         // Lissage temporel

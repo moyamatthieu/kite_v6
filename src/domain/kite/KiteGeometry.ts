@@ -296,21 +296,21 @@ export class KiteGeometry {
      */
     private definePanels(): void {
         this.panels = [
-            // Panneau supérieur gauche
+            // Panneau supérieur gauche (index 0)
             // 🔧 INVERSÉ : Ordre horaire vu de face → normale vers Z- (intrados)
             ['NEZ', 'BAS_COLONNE', 'STAB_GAUCHE', 'TRAVERSE_GAUCHE'],
             
-            // Panneau supérieur droit
+            // Panneau supérieur droit (index 1)
             // 🔧 INVERSÉ : Ordre horaire vu de face → normale vers Z- (intrados)
             ['NEZ', 'TRAVERSE_DROITE', 'STAB_DROIT', 'BAS_COLONNE'],
             
-            // Panneau inférieur gauche
-            // 🔧 INVERSÉ : Ordre horaire vu de face → normale vers Z- (intrados)
-            ['TRAVERSE_GAUCHE', 'STAB_GAUCHE', 'EXTREMITE_AILE_GAUCHE', 'EXTREMITE_AILE_GAUCHE'],
+            // Panneau inférieur gauche (index 2)
+            // 🔧 CORRECTION : Triangle valide au lieu de quadrilatère dégénéré
+            ['TRAVERSE_GAUCHE', 'BASE_STAB_GAUCHE', 'EXTREMITE_AILE_GAUCHE'],
             
-            // Panneau inférieur droit
-            // 🔧 INVERSÉ : Ordre horaire vu de face → normale vers Z- (intrados)
-            ['TRAVERSE_DROITE', 'EXTREMITE_AILE_DROITE', 'STAB_DROIT', 'STAB_DROIT'],
+            // Panneau inférieur droit (index 3)
+            // 🔧 CORRECTION : Triangle valide au lieu de quadrilatère dégénéré
+            ['TRAVERSE_DROITE', 'EXTREMITE_AILE_DROITE', 'BASE_STAB_DROIT'],
         ];
     }
     

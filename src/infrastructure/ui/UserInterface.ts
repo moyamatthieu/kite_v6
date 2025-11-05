@@ -19,6 +19,7 @@ export interface UICallbacks {
     onControlDeltaChange?: (delta: number) => void;
     onSimulationPause?: (paused: boolean) => void;
     onGeometryDebugToggle?: () => void;
+    onLiftDebugToggle?: () => void;
     onForceVectorsToggle?: () => void;
     onPanelNumbersToggle?: () => void;
 }
@@ -200,6 +201,21 @@ export class UserInterface {
                     transition: all 0.2s;
                 ">🔍 GÉOMÉTRIE</button>
                 
+                <button id="btn-lift-debug" style="
+                    flex: 1;
+                    background: rgba(255, 136, 68, 0.1);
+                    border: 1px solid rgba(255, 136, 68, 0.3);
+                    color: #ff8844;
+                    padding: 10px;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                ">🪁 PORTANCE</button>
+            </div>
+            
+            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
                 <button id="btn-forces" style="
                     flex: 1;
                     background: rgba(255, 215, 0, 0.1);
@@ -286,6 +302,10 @@ export class UserInterface {
             }
             #btn-geometry:hover {
                 background: rgba(68, 136, 255, 0.2) !important;
+                transform: translateY(-1px);
+            }
+            #btn-lift-debug:hover {
+                background: rgba(255, 136, 68, 0.2) !important;
                 transform: translateY(-1px);
             }
             #btn-forces:hover {
@@ -556,24 +576,39 @@ export class UserInterface {
         const pauseBtn = document.getElementById('btn-pause');
         const resetBtn = document.getElementById('btn-reset');
         const geometryBtn = document.getElementById('btn-geometry');
+        const liftDebugBtn = document.getElementById('btn-lift-debug');
         const forcesBtn = document.getElementById('btn-forces');
         const panelNumbersBtn = document.getElementById('btn-panel-numbers');
 
         pauseBtn?.addEventListener('click', () => {
-            this.callbacks.onSimulationPause?.(true);
-            this.addLog('⏸️ Simulation mise en pause', 'warning');
-            this.updatePauseButton(true);
+            // Toggle pause/resume
+            const currentlyPaused = pauseBtn.textContent?.includes('REPRENDRE') || false;
+            this.callbacks.onPause?.();
+            if (currentlyPaused) {
+                this.addLog('▶️ Simulation reprise', 'success');
+                this.updatePauseButton(false);
+            } else {
+                this.addLog('⏸️ Simulation mise en pause', 'warning');
+                this.updatePauseButton(true);
+            }
         });
 
         resetBtn?.addEventListener('click', () => {
+            console.log('🔄 [BUTTON] Bouton reset cliqué');
             this.callbacks.onReset?.();
             this.addLog('🔄 Simulation réinitialisée', 'info');
             this.updatePauseButton(false);
+            console.log('🔄 [BUTTON] Bouton reset traité');
         });
         
         geometryBtn?.addEventListener('click', () => {
             this.callbacks.onGeometryDebugToggle?.();
             this.addLog('🔍 Mode géométrie basculé', 'info');
+        });
+        
+        liftDebugBtn?.addEventListener('click', () => {
+            this.callbacks.onLiftDebugToggle?.();
+            this.addLog('🪁 Mode debug portance basculé', 'info');
         });
         
         forcesBtn?.addEventListener('click', () => {

@@ -197,7 +197,12 @@ export const DEFAULT_CONFIG: SimulationConfig = {
         // c = 0.22 × c_crit ≈ 10 Ns/m (sous-amorti, oscillations amorties)
         
         smoothingCoefficient: 0.8,  // Lissage numérique MAXIMAL (stabilité avec k élevé)
-        minTension: 0.1,  // N - Tension minimale quasi-nulle (ligne détendue)
+        
+        // 🔧 CORRECTION PHYSIQUE : Tension minimale réaliste
+        // Cette valeur simule la masse propre des lignes + friction de l'air
+        // Valeur typique : 0.5-2N pour 10m de ligne Dyneema (masse ≈ 5g/m)
+        // Permet de maintenir contrainte géométrique faible sans bloquer la chute
+        minTension: 1.0,  // N - Tension résiduelle (masse lignes + friction air)
         
         // Protection exponentielle (zone d'allongement critique >3%)
         exponentialThreshold: 0.3,  // m - Protection dès 3% d'allongement (au lieu de 5%)

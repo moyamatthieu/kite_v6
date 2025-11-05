@@ -116,6 +116,43 @@ export class Kite {
             .applyQuaternion(this.state.orientation)
             .normalize();  // Normaliser pour garantir vecteur unitaire
     }
+    
+    /**
+     * Calcule le point le plus bas du cerf-volant dans le repère global.
+     * Parcourt TOUS les points de la géométrie (structure + brides) pour trouver
+     * le Y minimum, ce qui permet une détection de collision réaliste avec le sol.
+     * 
+     * @param state - État optionnel à utiliser (si non fourni, utilise l'état actuel)
+     * @returns Objet avec le point le plus bas et son altitude Y
+     */
+    getLowestPoint(state?: KitePhysicsState): { point: THREE.Vector3; altitude: number } {
+        const stateToUse = state || this.state;
+        const allPoints = this.geometry.getAllPoints();
+        let lowestAltitude = Infinity;
+        let lowestPoint = new THREE.Vector3();
+        
+        for (const namedPoint of allPoints) {
+            // Transformer chaque point local en global
+            const globalPoint = new THREE.Vector3(
+                namedPoint.position.x,
+                namedPoint.position.y,
+                namedPoint.position.z
+            )
+                .applyQuaternion(stateToUse.orientation)
+                .add(stateToUse.position);
+            
+            // Garder le point avec Y le plus petit
+            if (globalPoint.y < lowestAltitude) {
+                lowestAltitude = globalPoint.y;
+                lowestPoint.copy(globalPoint);
+            }
+        }
+        
+        return {
+            point: lowestPoint,
+            altitude: lowestAltitude
+        };
+    }
 }
 
 /**

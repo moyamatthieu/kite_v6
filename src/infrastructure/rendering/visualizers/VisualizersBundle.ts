@@ -7,6 +7,8 @@
 import * as THREE from 'three';
 import { Kite } from '../../../domain/kite/Kite';
 import { MaterialFactory } from '../materials/MaterialFactory';
+import { KitePhysicsState, WindState } from '../../../core/types/PhysicsState';
+import { AerodynamicForceCalculator } from '../../../domain/physics/forces/AerodynamicForce';
 
 // Constantes pour la station de contrôle
 const STATION_CONFIG = {
@@ -259,6 +261,336 @@ export class TrajectoryVisualizer {
     dispose(): void {
         this.line.geometry.dispose();
         (this.line.material as THREE.Material).dispose();
+    }
+}
+
+/**
+ * Visualiseur pour les vecteurs de forces par panneau (mode debug portance).
+ * Affiche les forces aérodynamiques (portance/traînée) calculées sur chaque panneau
+ * ainsi que la force de gravité au centre de masse.
+ */
+export class PanelForceVisualizer {
+    private group: THREE.Group;
+    private liftArrows: THREE.ArrowHelper[] = [];
+    private dragArrows: THREE.ArrowHelper[] = [];
+    private gravityArrow?: THREE.ArrowHelper;
+    private initialized = false;
+    
+    constructor() {
+        this.group = new THREE.Group();
+        this.group.visible = false; // Invisible par défaut, activé en mode debug portance
+    }
+    
+    /**
+     * Initialise les flèches pour tous les panneaux.
+     */
+    private initializeArrows(panelCount: number): void {
+        if (this.initialized) return;
+        
+        const defaultDir = new THREE.Vector3(0, 1, 0);
+        const defaultPos = new THREE.Vector3(0, 0, 0);
+        
+        // Créer les flèches de portance (bleues) pour chaque panneau
+        for (let i = 0; i < panelCount; i++) {
+            const liftArrow = new THREE.ArrowHelper(
+                defaultDir.clone(), 
+                defaultPos.clone(), 
+                1, 
+                0x0066ff, // ✅ Bleu plus vif pour portance
+                0.4, 
+                0.2
+            );
+            this.liftArrows.push(liftArrow);
+            this.group.add(liftArrow);
+        }
+        
+        // Créer les flèches de traînée (rouges) pour chaque panneau  
+        for (let i = 0; i < panelCount; i++) {
+            const dragArrow = new THREE.ArrowHelper(
+                defaultDir.clone(), 
+                defaultPos.clone(), 
+                1, 
+                0xff3333, // ✅ Rouge plus vif pour traînée
+                0.3, 
+                0.15
+            );
+            this.dragArrows.push(dragArrow);
+            this.group.add(dragArrow);
+        }
+        
+        // Créer la flèche de gravité (jaune) au centre de masse
+        this.gravityArrow = new THREE.ArrowHelper(
+            defaultDir.clone(), 
+            defaultPos.clone(), 
+            1, 
+            0xffff00, // Jaune pour gravité
+            0.4, 
+            0.2
+        );
+        this.group.add(this.gravityArrow);
+        
+        this.initialized = true;
+    }
+    
+    /**
+     * Met à jour les vecteurs de forces par panneau.
+     */
+    updatePanelForces(
+        kite: Kite,
+        state: KitePhysicsState,
+        wind: WindState,
+        gravityForce: THREE.Vector3
+    ): void {
+        const panelCount = kite.getPanelCount();
+        
+        // Initialiser si nécessaire
+        if (!this.initialized) {
+            this.initializeArrows(panelCount);
+            console.log(`🪁 [PanelForceVisualizer] Initialisé avec ${panelCount} panneaux`);
+        }
+        
+        const scale = 0.5; // ✅ RÉDUIT: 1N = 0.5m pour meilleure visibilité
+        const minForce = 0.001; // ✅ RÉDUIT: Seuil plus bas pour voir plus de forces
+        
+        console.log(`🪁 [PanelForceVisualizer] Update: ${panelCount} panneaux, vent: ${wind.speed} m/s`);
+        console.log(`🪁 [Debug Vent] Direction: (${wind.velocity.x.toFixed(3)}, ${wind.velocity.y.toFixed(3)}, ${wind.velocity.z.toFixed(3)})`);
+        
+        // 🔍 DEBUG: Analyser les surfaces de tous les panneaux
+        console.log(`🔍 [ANALYSE SURFACES] Comparaison des surfaces des panneaux:`);
+        let totalSurface = 0;
+        for (let i = 0; i < panelCount; i++) {
+            const surface = kite.getPanelArea(i);
+            totalSurface += surface;
+            console.log(`   - Panneau ${i}: ${surface.toFixed(4)} m² (${(surface/totalSurface*100).toFixed(1)}% estimé du total)`);
+        }
+        console.log(`   - TOTAL: ${totalSurface.toFixed(4)} m²`);
+        
+        // 🔍 DEBUG: Calculer les forces totales pour validation
+        let totalLiftMag = 0;
+        let totalDragMag = 0;
+        // Mettre à jour les forces par panneau
+        for (let i = 0; i < panelCount && i < this.liftArrows.length; i++) {
+            // 🔍 DEBUG: Vérifier la normale du panneau
+            const panelNormal = kite.getGlobalPanelNormal(i);
+            const panelCentroid = kite.getGlobalPanelCentroid(i);
+            const panelArea = kite.getPanelArea(i);
+            
+            // 🔍 DEBUG DÉTAILLÉ pour panneau spécifique
+            if (i === 1) { // Panneau 2 (index 1)
+                console.log(`🔍 [PANNEAU 2 ANALYSE DÉTAILLÉE]`);
+                console.log(`   - Points du panneau:`, kite.geometry.getPanelPoints(i).map(p => `(${p.x.toFixed(3)}, ${p.y.toFixed(3)}, ${p.z.toFixed(3)})`));
+                console.log(`   - Normale locale:`, kite.geometry.getPanelNormal(i));
+                console.log(`   - Normale globale: (${panelNormal.x.toFixed(3)}, ${panelNormal.y.toFixed(3)}, ${panelNormal.z.toFixed(3)})`);
+                console.log(`   - Centroïde: (${panelCentroid.x.toFixed(3)}, ${panelCentroid.y.toFixed(3)}, ${panelCentroid.z.toFixed(3)})`);
+                console.log(`   - Surface: ${panelArea.toFixed(6)} m²`);
+            }
+            
+            console.log(`🪁 [Panneau ${i}] Normale: (${panelNormal.x.toFixed(3)}, ${panelNormal.y.toFixed(3)}, ${panelNormal.z.toFixed(3)})`);
+            console.log(`🪁 [Panneau ${i}] Centroïde: (${panelCentroid.x.toFixed(3)}, ${panelCentroid.y.toFixed(3)}, ${panelCentroid.z.toFixed(3)})`);
+            console.log(`🪁 [Panneau ${i}] Surface: ${panelArea.toFixed(4)} m²`);
+            
+            // Calculer les forces pour ce panneau spécifique
+            const panelForce = this.calculatePanelForce(i, kite, state, wind);
+            
+            // Flèche de portance (bleue)
+            const liftMagnitude = panelForce.lift.length();
+            totalLiftMag += liftMagnitude;
+            
+            if (liftMagnitude > minForce) {
+                this.liftArrows[i].setDirection(panelForce.lift.clone().normalize());
+                this.liftArrows[i].setLength(liftMagnitude * scale);
+                this.liftArrows[i].position.copy(panelCentroid);
+                this.liftArrows[i].visible = true;
+                
+                const liftDir = panelForce.lift.clone().normalize();
+                console.log(`🪁 [Panneau ${i}] Portance: ${liftMagnitude.toFixed(3)}N, direction: (${liftDir.x.toFixed(3)}, ${liftDir.y.toFixed(3)}, ${liftDir.z.toFixed(3)})`);
+            } else {
+                this.liftArrows[i].visible = false;
+                console.log(`🪁 [Panneau ${i}] Portance trop faible: ${liftMagnitude.toFixed(3)}N`);
+            }
+            
+            // Flèche de traînée (rouge)
+            const dragMagnitude = panelForce.drag.length();
+            totalDragMag += dragMagnitude;
+            
+            if (dragMagnitude > minForce) {
+                this.dragArrows[i].setDirection(panelForce.drag.clone().normalize());
+                this.dragArrows[i].setLength(dragMagnitude * scale);
+                this.dragArrows[i].position.copy(panelCentroid);
+                this.dragArrows[i].visible = true;
+                
+                const dragDir = panelForce.drag.clone().normalize();
+                console.log(`🪁 [Panneau ${i}] Traînée: ${dragMagnitude.toFixed(3)}N, direction: (${dragDir.x.toFixed(3)}, ${dragDir.y.toFixed(3)}, ${dragDir.z.toFixed(3)})`);
+            } else {
+                this.dragArrows[i].visible = false;
+                console.log(`🪁 [Panneau ${i}] Traînée trop faible: ${dragMagnitude.toFixed(3)}N`);
+            }
+        }
+        
+        // 🔍 RÉSUMÉ FINAL
+        console.log(`📊 [RÉSUMÉ FORCES AÉRO]`);
+        console.log(`   - Portance totale: ${totalLiftMag.toFixed(3)} N`);
+        console.log(`   - Traînée totale: ${totalDragMag.toFixed(3)} N`);
+        console.log(`   - Ratio L/D: ${totalDragMag > 0 ? (totalLiftMag/totalDragMag).toFixed(2) : 'N/A'}`);
+        
+        
+        // Flèche de gravité au centre de masse
+        if (this.gravityArrow) {
+            const gravityMagnitude = gravityForce.length();
+            if (gravityMagnitude > minForce) {
+                this.gravityArrow.setDirection(gravityForce.clone().normalize());
+                this.gravityArrow.setLength(gravityMagnitude * scale);
+                this.gravityArrow.position.copy(state.position); // Centre de masse
+                this.gravityArrow.visible = true;
+                console.log(`🪁 [Gravité] ${gravityMagnitude.toFixed(3)}N au centre de masse ${state.position.toArray().map(v => v.toFixed(2)).join(', ')}`);
+            } else {
+                this.gravityArrow.visible = false;
+            }
+        }
+    }
+    
+    /**
+     * Calcule la force sur un panneau spécifique (copié depuis AerodynamicForceCalculator).
+     */
+    private calculatePanelForce(
+        panelIndex: number,
+        kite: Kite,
+        state: KitePhysicsState,
+        wind: WindState
+    ): { lift: THREE.Vector3; drag: THREE.Vector3 } {
+        // ✅ CORRECTION CRITIQUE : Le vent dans WindState souffle de Z- vers Z+
+        // Mais wind.velocity est déjà dans la bonne direction (vers Z+)
+        // Pour calculer le vent apparent : vent_apparent = vent_absolu - vitesse_objet
+        const apparentWind = new THREE.Vector3().copy(wind.velocity).sub(state.velocity);
+        const windSpeed = apparentWind.length();
+        
+        if (windSpeed < 0.1) {
+            return { 
+                lift: new THREE.Vector3(0, 0, 0), 
+                drag: new THREE.Vector3(0, 0, 0) 
+            };
+        }
+        
+        // Direction du vent apparent (normalisée)
+        const windDirection = apparentWind.clone().normalize();
+        const panelNormal = kite.getGlobalPanelNormal(panelIndex);
+        const panelArea = kite.getPanelArea(panelIndex);
+        
+        // 🔍 DEBUG: Log détaillé des calculs
+        console.log(`🔍 [Panneau ${panelIndex}] Calculs détaillés:`);
+        console.log(`   - Vent apparent: (${apparentWind.x.toFixed(3)}, ${apparentWind.y.toFixed(3)}, ${apparentWind.z.toFixed(3)}) = ${windSpeed.toFixed(3)} m/s`);
+        console.log(`   - Direction vent: (${windDirection.x.toFixed(3)}, ${windDirection.y.toFixed(3)}, ${windDirection.z.toFixed(3)})`);
+        console.log(`   - Normale panneau: (${panelNormal.x.toFixed(3)}, ${panelNormal.y.toFixed(3)}, ${panelNormal.z.toFixed(3)})`);
+        console.log(`   - Surface: ${panelArea.toFixed(4)} m²`);
+        
+        const normalWindComponent = panelNormal.dot(windDirection);
+        const alpha = Math.asin(Math.min(1, Math.abs(normalWindComponent)));
+        
+        console.log(`   - Composante normale: ${normalWindComponent.toFixed(3)}`);
+        console.log(`   - Angle d'attaque α: ${(alpha * 180 / Math.PI).toFixed(1)}°`);
+        
+        // Coefficients aérodynamiques
+        const Cl = this.getLiftCoefficient(alpha);
+        const Cd = this.getDragCoefficient(alpha);
+        
+        console.log(`   - Cl: ${Cl.toFixed(3)}, Cd: ${Cd.toFixed(3)}`);
+        
+        const dynamicPressure = 0.5 * 1.225 * windSpeed * windSpeed;
+        const liftMagnitude = dynamicPressure * panelArea * Cl;
+        const dragMagnitude = dynamicPressure * panelArea * Cd;
+        
+        console.log(`   - Pression dynamique: ${dynamicPressure.toFixed(2)} Pa`);
+        console.log(`   - Magnitude portance: ${liftMagnitude.toFixed(3)} N`);
+        console.log(`   - Magnitude traînée: ${dragMagnitude.toFixed(3)} N`);
+        
+        // ✅ CORRECTION : Traînée dans le sens du vent apparent (pas opposée)
+        // La traînée freine l'objet dans le sens de son mouvement relatif au fluide
+        const drag = windDirection.clone().multiplyScalar(dragMagnitude);
+        
+        // ✅ CORRECTION : Portance perpendiculaire au vent apparent (double produit vectoriel)
+        const axis = new THREE.Vector3().crossVectors(panelNormal, windDirection);
+        
+        if (axis.length() < 0.01) {
+            // Normal parallèle au vent → pas de portance
+            console.log(`   - ⚠️ Normale parallèle au vent → pas de portance`);
+            return { 
+                lift: new THREE.Vector3(0, 0, 0), 
+                drag 
+            };
+        }
+        
+        // Double produit vectoriel pour direction de portance
+        const liftDirection = new THREE.Vector3().crossVectors(windDirection, axis).normalize();
+        const lift = liftDirection.multiplyScalar(liftMagnitude);
+        
+        console.log(`   - Direction portance: (${liftDirection.x.toFixed(3)}, ${liftDirection.y.toFixed(3)}, ${liftDirection.z.toFixed(3)})`);
+        console.log(`   - Direction traînée: (${drag.x < 0 ? '' : '+'}${(drag.x/dragMagnitude).toFixed(3)}, ${drag.y < 0 ? '' : '+'}${(drag.y/dragMagnitude).toFixed(3)}, ${drag.z < 0 ? '' : '+'}${(drag.z/dragMagnitude).toFixed(3)})`);
+        
+        return { lift, drag };
+    }
+    
+    /**
+     * Coefficient de portance (copié depuis AerodynamicForceCalculator).
+     */
+    private getLiftCoefficient(alpha: number): number {
+        const alphaDeg = (alpha * 180) / Math.PI;
+        
+        if (alphaDeg < 5 || alphaDeg > 45) {
+            return 0.1;
+        }
+        
+        const normalizedAlpha = (alphaDeg - 15) / 15;
+        const Cl = 1.2 * (1 - normalizedAlpha * normalizedAlpha);
+        
+        return Math.max(0.1, Cl);
+    }
+    
+    /**
+     * Coefficient de traînée (copié depuis AerodynamicForceCalculator).
+     */
+    private getDragCoefficient(alpha: number): number {
+        const alphaDeg = (alpha * 180) / Math.PI;
+        
+        if (alphaDeg < 5 || alphaDeg > 45) {
+            return 1.2;
+        }
+        
+        const Cl = this.getLiftCoefficient(alpha);
+        const Cd_forme = 0.3;
+        const Cd_induit = 0.5 * Cl * Cl;
+        
+        return Cd_forme + Cd_induit;
+    }
+    
+    getObject(): THREE.Group {
+        return this.group;
+    }
+    
+    setVisible(visible: boolean): void {
+        this.group.visible = visible;
+    }
+    
+    dispose(): void {
+        this.liftArrows.forEach(arrow => {
+            arrow.line.geometry.dispose();
+            (arrow.line.material as THREE.Material).dispose();
+            arrow.cone.geometry.dispose();
+            (arrow.cone.material as THREE.Material).dispose();
+        });
+        
+        this.dragArrows.forEach(arrow => {
+            arrow.line.geometry.dispose();
+            (arrow.line.material as THREE.Material).dispose();
+            arrow.cone.geometry.dispose();
+            (arrow.cone.material as THREE.Material).dispose();
+        });
+        
+        if (this.gravityArrow) {
+            this.gravityArrow.line.geometry.dispose();
+            (this.gravityArrow.line.material as THREE.Material).dispose();
+            this.gravityArrow.cone.geometry.dispose();
+            (this.gravityArrow.cone.material as THREE.Material).dispose();
+        }
     }
 }
 

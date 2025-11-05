@@ -115,9 +115,20 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
     
     /**
      * Calcule les forces aérodynamiques avec détails par panneau.
+     * 
+     * 🔧 APPROCHE CORRECTE : Calcul des forces PAR PANNEAU individuellement
+     * Chaque panneau génère ses propres forces aérodynamiques en fonction de :
+     * - Son orientation locale (normale)
+     * - Sa surface locale
+     * - L'angle d'attaque local du vent apparent
+     * 
+     * Les forces NE S'ADDITIONNENT PAS simplement - elles sont calculées
+     * indépendamment pour chaque surface et appliquées au centre de masse.
+     * 
      * ✅ OPTIMISÉ: Réutilise vecteurs temporaires au lieu de créer/cloner
      */
     calculateDetailed(state: KitePhysicsState, wind: WindState, deltaTime: number): AerodynamicForceResult {
+        const totalForce = new THREE.Vector3(0, 0, 0);
         const totalLift = new THREE.Vector3(0, 0, 0);
         const totalDrag = new THREE.Vector3(0, 0, 0);
         
@@ -132,7 +143,7 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
                 drag: totalDrag,
                 total: new THREE.Vector3(0, 0, 0),
                 angleOfAttack: 0,
-                apparentWind: this.tempVector1.clone(), // Clone pour retour
+                apparentWind: this.tempVector1.clone(),
                 liftCoefficient: 0,
                 dragCoefficient: 0,
             };
@@ -141,8 +152,10 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         // Direction du vent (réutilise tempVector2)
         this.tempVector2.copy(this.tempVector1).normalize();
         
-        // Sommer les forces sur tous les panneaux
+        // 🔧 CALCUL PAR PANNEAU : Chaque face génère sa propre force indépendamment
         const panelCount = this.kite.getPanelCount();
+        let totalArea = 0;
+        let weightedAlpha = 0;
         
         for (let i = 0; i < panelCount; i++) {
             const panelForce = this.calculatePanelForce(
@@ -153,36 +166,52 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
                 windSpeed
             );
             
+            // Accumuler les forces (vectoriellement, chaque panneau contribue)
             totalLift.add(panelForce.lift);
             totalDrag.add(panelForce.drag);
+            totalForce.add(panelForce.lift).add(panelForce.drag);
+            
+            // Pour l'angle d'attaque moyen pondéré par surface
+            const panelArea = this.kite.getPanelArea(i);
+            const panelNormal = this.kite.getGlobalPanelNormal(i);
+            const normalWindComponent = panelNormal.dot(this.tempVector2);
+            const alpha = Math.asin(Math.min(1, Math.abs(normalWindComponent)));
+            
+            totalArea += panelArea;
+            weightedAlpha += alpha * panelArea;
         }
         
-        const total = totalLift.clone().add(totalDrag);
-        
-        // Angle d'attaque moyen (simplifié: panneau central)
-        const centralPanelIndex = Math.floor(panelCount / 2);
-        const centralNormal = this.kite.getGlobalPanelNormal(centralPanelIndex);
-        const angleOfAttack = Math.asin(Math.abs(centralNormal.dot(this.tempVector2)));
+        // Angle d'attaque moyen pondéré par surface
+        const avgAlpha = totalArea > 0 ? weightedAlpha / totalArea : 0;
         
         return {
             lift: totalLift,
             drag: totalDrag,
-            total,
-            angleOfAttack,
-            apparentWind: this.tempVector1.clone(), // Clone pour retour
-            liftCoefficient: this.getLiftCoefficient(angleOfAttack),
-            dragCoefficient: this.getDragCoefficient(angleOfAttack),
+            total: totalForce,
+            angleOfAttack: avgAlpha,
+            apparentWind: this.tempVector1.clone(),
+            liftCoefficient: this.getLiftCoefficient(avgAlpha),
+            dragCoefficient: this.getDragCoefficient(avgAlpha),
         };
     }
     
     /**
      * Calcule la force sur un panneau spécifique.
-     * ✅ OPTIMISÉ: Réutilise tempVector3 pour réduire allocations
      * 
-     * La portance dépend de l'angle d'attaque et de l'orientation relative au vent.
-     * Pour un profil aérodynamique correctement orienté :
-     * - Intrados frappé par le vent (normalWindComponent > 0) : portance positive
-     * - Extrados frappé par le vent (normalWindComponent < 0) : portance négative (profil inversé)
+     * 🔧 PHYSIQUE CORRECTE PAR PANNEAU :
+     * Chaque panneau est traité comme une surface aérodynamique indépendante qui génère :
+     * - PORTANCE : Perpendiculaire au vent apparent, proportionnelle à la surface projetée
+     * - TRAÎNÉE : Parallèle au vent apparent (opposée au mouvement relatif)
+     * 
+     * Les forces dépendent de :
+     * - Surface du panneau (S)
+     * - Angle d'attaque local (α) entre normale et vent
+     * - Pression dynamique (q = 0.5 × ρ × v²)
+     * - Coefficients aérodynamiques Cl(α) et Cd(α)
+     * 
+     * Force = q × S × Coefficient × Direction
+     * 
+     * ✅ OPTIMISÉ: Réutilise tempVector3 pour réduire allocations
      */
     private calculatePanelForce(
         panelIndex: number,
@@ -194,53 +223,54 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         const panelNormal = this.kite.getGlobalPanelNormal(panelIndex);
         const panelArea = this.kite.getPanelArea(panelIndex);
 
+        // 🔧 Angle d'attaque LOCAL du panneau
+        // α = angle entre normale du panneau et direction du vent
         const normalWindComponent = panelNormal.dot(windDirection);
         const alpha = Math.asin(Math.min(1, Math.abs(normalWindComponent)));
         
+        // 🔧 Coefficients aérodynamiques spécifiques à cet angle
         const Cl = this.getLiftCoefficient(alpha);
         const Cd = this.getDragCoefficient(alpha);
         
+        // 🔧 Pression dynamique : q = 0.5 × ρ × v²
         const dynamicPressure = 0.5 * this.config.airDensity * windSpeed * windSpeed;
+        
+        // 🔧 Magnitude des forces : F = q × S × C
         const liftMagnitude = dynamicPressure * panelArea * Cl;
         const dragMagnitude = dynamicPressure * panelArea * Cd;
 
-        // Traînée : Opposée au vent apparent
-        const drag = windDirection.clone().multiplyScalar(-dragMagnitude);
-
         // ═══════════════════════════════════════════════════════════════════════════
-        // PORTANCE : Direction correcte par DOUBLE PRODUIT VECTORIEL
-        // ═══════════════════════════════════════════════════════════════════════════
-        // La portance doit être perpendiculaire au vent apparent ET pointer vers 
-        // l'extérieur du cerf-volant (intrados).
-        // 
-        // Méthode du double produit vectoriel (correcte pour cerf-volant) :
-        // 1. axe = panelNormal × windDirection (perpendiculaire au plan normal-vent)
-        // 2. liftDirection = axe × windDirection (perpendiculaire au vent, dans le plan)
-        // 
-        // Cette méthode garantit que la portance :
-        // - Est toujours perpendiculaire au vent apparent
-        // - Pointe vers l'extérieur de l'aile (intrados)
-        // - S'adapte correctement lors des virages
+        // DIRECTION DES FORCES
         // ═══════════════════════════════════════════════════════════════════════════
         
-        // Étape 1 : Calculer l'axe perpendiculaire (réutilise tempVector3)
+        // 🔧 TRAÎNÉE : Dans le sens du vent apparent (freine l'objet)
+        // Direction = direction du vent apparent
+        const drag = windDirection.clone().multiplyScalar(dragMagnitude);
+
+        // 🔧 PORTANCE : Perpendiculaire au vent apparent
+        // Calculée par DOUBLE PRODUIT VECTORIEL pour garantir :
+        // - Perpendiculaire au vent
+        // - Dans le plan du panneau
+        // - Sens correct (vers l'extrados ou intrados selon orientation)
+        
+        // Étape 1 : Axe perpendiculaire au plan (normale × vent)
         this.tempVector3.crossVectors(panelNormal, windDirection);
         
         if (this.tempVector3.length() < 0.01) {
-            // Normal parallèle au vent → pas de portance (angle d'attaque = 0° ou 180°)
+            // Panneau parallèle au vent → pas de portance (α ≈ 0° ou 180°)
             return { 
                 lift: new THREE.Vector3(0, 0, 0), 
                 drag 
             };
         }
         
-        // Étape 2 : Double produit vectoriel pour obtenir direction portance
-        const liftDirection = new THREE.Vector3().crossVectors(this.tempVector3, windDirection).normalize();
+        // Étape 2 : Direction de portance (vent × axe)
+        // Le double produit vectoriel garantit que la portance est :
+        // - Perpendiculaire au vent (produit vectoriel avec windDirection)
+        // - Dans le plan défini par normale et vent
+        const liftDirection = new THREE.Vector3().crossVectors(windDirection, this.tempVector3).normalize();
         
-        // Étape 3 : Appliquer le signe (intrados vs extrados)
-        const normalDotWind = panelNormal.dot(windDirection);
-        const liftSign = Math.sign(normalDotWind) || 1;
-        const lift = liftDirection.multiplyScalar(liftMagnitude * liftSign);
+        const lift = liftDirection.multiplyScalar(liftMagnitude);
         
         return { lift, drag };
     }
@@ -248,59 +278,66 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
     /**
      * Coefficient de portance en fonction de l'angle d'attaque.
      * 
-     * 🪁 MODÈLE SPÉCIFIQUE CERF-VOLANT (pas un avion !)
+     * 🪁 MODÈLE PHYSIQUE CERF-VOLANT RÉALISTE (corrigé)
      * 
      * Principes physiques d'un cerf-volant :
-     * - α ≈ 0° : Parallèle au vent → Portance minimale, forte traînée (décrochage)
-     * - α ≈ 10-20° : Angle optimal → Portance maximale (vol stable)
-     * - α > 45° : Surface max au vent → Effet parachute (freinage violent)
+     * - α ≈ 0° : Parallèle au vent → Portance faible mais NON NULLE (écoulement laminaire)
+     * - α ≈ 15-20° : Angle optimal → Portance maximale (vol stable)
+     * - α ≈ 90° : Surface perpendiculaire au vent → Portance nulle, traînée max (parachute)
      * 
-     * Ce modèle force le cerf-volant à trouver son équilibre optimal naturellement
-     * (comportement émergent, pas scripté).
+     * 🔧 CORRECTION CRITIQUE : Un cerf-volant génère TOUJOURS de la portance
+     * tant qu'il y a du vent apparent, même à angle faible. Le minimum est 20% de Cl_max.
+     * 
+     * Modèle : Cl(α) = Cl_max × sin(2α)
+     * - 0° → Cl = 0 (théorique)
+     * - 15° → Cl ≈ 0.5 × Cl_max (efficace)
+     * - 45° → Cl = Cl_max (optimal pour cerf-volant)
+     * - 90° → Cl = 0 (perpendiculaire, effet parachute)
      * 
      * @param alpha - Angle d'attaque en radians
      * @returns Coefficient de portance Cl (sans unité)
      */
     private getLiftCoefficient(alpha: number): number {
-        const alphaDeg = (alpha * 180) / Math.PI;
+        // Modèle sinusoïdal : Cl = Cl_max × sin(2α)
+        // Ce modèle est physiquement correct pour surfaces plates
+        const Cl = this.config.referenceLiftCoefficient * Math.sin(2 * alpha);
         
-        // 1. Décrochage ou freinage (angle trop faible ou trop élevé)
-        if (alphaDeg < 5 || alphaDeg > 45) {
-            return 0.1; // Très faible portance (cerf-volant instable/chute)
-        }
+        // Minimum à 20% de Cl_max pour garantir portance même à faibles angles
+        // (écoulement laminaire + effet Coanda sur la toile)
+        const Cl_min = 0.2 * this.config.referenceLiftCoefficient;
         
-        // 2. Vol optimal (15-20°)
-        // Fonction parabolique centrée sur 15° qui maximise Cl
-        const normalizedAlpha = (alphaDeg - 15) / 15; // Centré sur 15°
-        const Cl = this.config.referenceLiftCoefficient * (1 - normalizedAlpha * normalizedAlpha);
-        
-        return Math.max(0.1, Cl); // Minimum 0.1 pour stabilité numérique
+        return Math.max(Cl_min, Math.abs(Cl));
     }
     
     /**
      * Coefficient de traînée en fonction de l'angle d'attaque.
      * 
-     * 🪁 MODÈLE SPÉCIFIQUE CERF-VOLANT
+     * 🪁 MODÈLE PHYSIQUE CERF-VOLANT RÉALISTE (corrigé)
      * 
-     * La traînée augmente fortement aux angles extrêmes (effet parachute).
-     * Cd = Cd_min (traînée de forme) + Cd_induit (dépend de Cl²)
+     * La traînée augmente avec l'angle (plus de surface exposée).
+     * Cd = Cd_min + Cd_max × sin²(α)
+     * 
+     * 🔧 CORRECTION : Traînée progressive, pas de seuils brutaux
+     * - 0° → Cd ≈ 0.3 (traînée de forme minimale)
+     * - 45° → Cd ≈ 0.8 (traînée modérée)
+     * - 90° → Cd ≈ 1.2 (effet parachute complet)
      * 
      * @param alpha - Angle d'attaque en radians
      * @returns Coefficient de traînée Cd (sans unité)
      */
     private getDragCoefficient(alpha: number): number {
-        const alphaDeg = (alpha * 180) / Math.PI;
+        // Traînée de forme (minimale, présente même à α=0)
+        const Cd_forme = this.config.referenceDragCoefficient;
         
-        // 1. Effet parachute (angle > 45° ou < 5°)
-        if (alphaDeg < 5 || alphaDeg > 45) {
-            return 1.2; // Traînée très forte (freinage brutal)
-        }
+        // Traînée due à l'angle d'attaque (effet parachute)
+        // Croît avec sin²(α) : maximale à 90°
+        const Cd_angle = 0.7 * Math.sin(alpha) * Math.sin(alpha);
         
-        // 2. Vol normal : Cd = Cd_forme + Cd_induit
+        // Traînée induite (due à la portance)
         const Cl = this.getLiftCoefficient(alpha);
-        const Cd_forme = 0.3; // Traînée minimale (forme du cerf-volant)
-        const Cd_induit = 0.5 * Cl * Cl; // Traînée induite par la portance
+        const aspectRatio = 2.5; // Envergure / hauteur ≈ 1.65 / 0.65
+        const Cd_induit = (Cl * Cl) / (Math.PI * aspectRatio);
         
-        return Cd_forme + Cd_induit;
+        return Cd_forme + Cd_angle + Cd_induit;
     }
 }
