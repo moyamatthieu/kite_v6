@@ -245,15 +245,40 @@ export class TrajectoryVisualizer {
 
 /**
  * Visualiseur pour les vecteurs de forces (debug).
+ * ✅ OPTIMISÉ: Réutilise les flèches existantes au lieu de les recréer à chaque frame
  */
 export class DebugVisualizer {
     private arrows: THREE.ArrowHelper[] = [];
     private group: THREE.Group;
+    private initialized = false;
     
     constructor() {
         this.group = new THREE.Group();
         this.group.visible = true; // Visible par défaut
-        console.log('✨ DebugVisualizer créé - group.visible:', this.group.visible);
+    }
+    
+    /**
+     * Initialise les flèches UNE SEULE FOIS (appelé au premier updateForceVectors).
+     * ✅ CORRECTION FUITE MÉMOIRE: Créer les objets une seule fois
+     */
+    private initializeArrows(position: THREE.Vector3): void {
+        if (this.initialized) return;
+        
+        const defaultDir = new THREE.Vector3(1, 0, 0);
+        
+        // 7 flèches (une pour chaque type de force)
+        this.arrows = [
+            new THREE.ArrowHelper(defaultDir.clone(), position, 1, 0x00ff00, 0.3, 0.15), // 0: Aéro (VERT)
+            new THREE.ArrowHelper(defaultDir.clone(), position, 1, 0x0000ff, 0.3, 0.15), // 1: Gravité (BLEU)
+            new THREE.ArrowHelper(defaultDir.clone(), position, 1, 0x00ffff, 0.3, 0.15), // 2: Lignes total (CYAN)
+            new THREE.ArrowHelper(defaultDir.clone(), position, 1, 0xff0000, 0.25, 0.12), // 3: Ligne G (ROUGE)
+            new THREE.ArrowHelper(defaultDir.clone(), position, 1, 0x4444ff, 0.25, 0.12), // 4: Ligne D (BLEU CLAIR)
+            new THREE.ArrowHelper(defaultDir.clone(), position, 1, 0xffff00, 0.4, 0.2),   // 5: Total (JAUNE)
+            new THREE.ArrowHelper(defaultDir.clone(), position, 1, 0xff00ff, 0.35, 0.18), // 6: Torque (MAGENTA)
+        ];
+        
+        this.arrows.forEach(arrow => this.group.add(arrow));
+        this.initialized = true;
     }
     
     updateForceVectors(
@@ -268,120 +293,86 @@ export class DebugVisualizer {
             torque?: THREE.Vector3;
         }
     ): void {
-        // Nettoyer anciennes flèches
-        this.arrows.forEach(arrow => this.group.remove(arrow));
-        this.arrows = [];
+        // Initialiser les flèches si première fois
+        if (!this.initialized) {
+            this.initializeArrows(position);
+        }
         
-        const scale = 1.0; // 1N = 1m (augmenté pour meilleure visibilité)
+        const scale = 1.0; // 1N = 1m
         const torqueScale = 3.0; // 1Nm = 3m pour couple
+        const minForce = 0.01; // Force minimale pour afficher
         
-        // Debug: log des forces reçues et de la position
-        console.log('🔍 Debug Forces:', {
-            position: `(${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`,
-            aero: forces.aerodynamic?.length().toFixed(2),
-            gravity: forces.gravity?.length().toFixed(2),
-            lines: forces.lines?.length().toFixed(2),
-            linesLeft: forces.linesLeft?.length().toFixed(2),
-            linesRight: forces.linesRight?.length().toFixed(2),
-            total: forces.total?.length().toFixed(2),
-            torque: forces.torque?.length().toFixed(2),
-            groupVisible: this.group.visible,
-        });
+        // ✅ OPTIMISATION: Mettre à jour les flèches existantes au lieu de les recréer
         
-        // Force aérodynamique (VERT)
-        if (forces.aerodynamic && forces.aerodynamic.length() > 0.01) {
-            const arrow = new THREE.ArrowHelper(
-                forces.aerodynamic.clone().normalize(),
-                position,
-                forces.aerodynamic.length() * scale,
-                0x00ff00, // Vert
-                0.3, 0.15
-            );
-            this.arrows.push(arrow);
-            this.group.add(arrow);
-            console.log(`✅ Flèche AERO créée: longueur=${(forces.aerodynamic.length() * scale).toFixed(2)}m, pos=(${position.x.toFixed(1)}, ${position.y.toFixed(1)}, ${position.z.toFixed(1)})`);
+        // 0: Force aérodynamique (VERT)
+        if (forces.aerodynamic && forces.aerodynamic.length() > minForce) {
+            this.arrows[0].setDirection(forces.aerodynamic.clone().normalize());
+            this.arrows[0].setLength(forces.aerodynamic.length() * scale);
+            this.arrows[0].position.copy(position);
+            this.arrows[0].visible = true;
+        } else {
+            this.arrows[0].visible = false;
         }
         
-        // Force de gravité (BLEU)
-        if (forces.gravity && forces.gravity.length() > 0.01) {
-            const arrow = new THREE.ArrowHelper(
-                forces.gravity.clone().normalize(),
-                position,
-                forces.gravity.length() * scale,
-                0x0000ff, // Bleu
-                0.3, 0.15
-            );
-            this.arrows.push(arrow);
-            this.group.add(arrow);
+        // 1: Force de gravité (BLEU)
+        if (forces.gravity && forces.gravity.length() > minForce) {
+            this.arrows[1].setDirection(forces.gravity.clone().normalize());
+            this.arrows[1].setLength(forces.gravity.length() * scale);
+            this.arrows[1].position.copy(position);
+            this.arrows[1].visible = true;
+        } else {
+            this.arrows[1].visible = false;
         }
         
-        // Force des lignes totale (CYAN)
-        if (forces.lines && forces.lines.length() > 0.01) {
-            const arrow = new THREE.ArrowHelper(
-                forces.lines.clone().normalize(),
-                position,
-                forces.lines.length() * scale,
-                0x00ffff, // Cyan
-                0.3, 0.15
-            );
-            this.arrows.push(arrow);
-            this.group.add(arrow);
+        // 2: Force des lignes totale (CYAN)
+        if (forces.lines && forces.lines.length() > minForce) {
+            this.arrows[2].setDirection(forces.lines.clone().normalize());
+            this.arrows[2].setLength(forces.lines.length() * scale);
+            this.arrows[2].position.copy(position);
+            this.arrows[2].visible = true;
+        } else {
+            this.arrows[2].visible = false;
         }
         
-        // Force ligne GAUCHE (ROUGE)
-        if (forces.linesLeft && forces.linesLeft.length() > 0.01) {
-            const arrow = new THREE.ArrowHelper(
-                forces.linesLeft.clone().normalize(),
-                position,
-                forces.linesLeft.length() * scale,
-                0xff0000, // Rouge
-                0.25, 0.12
-            );
-            this.arrows.push(arrow);
-            this.group.add(arrow);
+        // 3: Force ligne GAUCHE (ROUGE)
+        if (forces.linesLeft && forces.linesLeft.length() > minForce) {
+            this.arrows[3].setDirection(forces.linesLeft.clone().normalize());
+            this.arrows[3].setLength(forces.linesLeft.length() * scale);
+            this.arrows[3].position.copy(position);
+            this.arrows[3].visible = true;
+        } else {
+            this.arrows[3].visible = false;
         }
         
-        // Force ligne DROITE (BLEU CLAIR)
-        if (forces.linesRight && forces.linesRight.length() > 0.01) {
-            const arrow = new THREE.ArrowHelper(
-                forces.linesRight.clone().normalize(),
-                position,
-                forces.linesRight.length() * scale,
-                0x4444ff, // Bleu clair
-                0.25, 0.12
-            );
-            this.arrows.push(arrow);
-            this.group.add(arrow);
+        // 4: Force ligne DROITE (BLEU CLAIR)
+        if (forces.linesRight && forces.linesRight.length() > minForce) {
+            this.arrows[4].setDirection(forces.linesRight.clone().normalize());
+            this.arrows[4].setLength(forces.linesRight.length() * scale);
+            this.arrows[4].position.copy(position);
+            this.arrows[4].visible = true;
+        } else {
+            this.arrows[4].visible = false;
         }
         
-        // Force totale (JAUNE - plus grosse)
-        if (forces.total && forces.total.length() > 0.01) {
-            const arrow = new THREE.ArrowHelper(
-                forces.total.clone().normalize(),
-                position,
-                forces.total.length() * scale,
-                0xffff00, // Jaune
-                0.4, 0.2
-            );
-            this.arrows.push(arrow);
-            this.group.add(arrow);
+        // 5: Force totale (JAUNE - plus grosse)
+        if (forces.total && forces.total.length() > minForce) {
+            this.arrows[5].setDirection(forces.total.clone().normalize());
+            this.arrows[5].setLength(forces.total.length() * scale);
+            this.arrows[5].position.copy(position);
+            this.arrows[5].visible = true;
+        } else {
+            this.arrows[5].visible = false;
         }
         
-        // Couple/Torque (MAGENTA - visualisé comme axe de rotation)
-        if (forces.torque && forces.torque.length() > 0.01) {
-            const arrow = new THREE.ArrowHelper(
-                forces.torque.clone().normalize(),
-                position,
-                forces.torque.length() * torqueScale,
-                0xff00ff, // Magenta
-                0.35, 0.18
-            );
-            this.arrows.push(arrow);
-            this.group.add(arrow);
+        // 6: Couple/Torque (MAGENTA - visualisé comme axe de rotation)
+        if (forces.torque && forces.torque.length() > minForce) {
+            this.arrows[6].setDirection(forces.torque.clone().normalize());
+            this.arrows[6].setLength(forces.torque.length() * torqueScale);
+            this.arrows[6].position.copy(position);
+            this.arrows[6].visible = true;
+        } else {
+            this.arrows[6].visible = false;
         }
-        
-        // Log nombre de flèches créées
-        console.log(`✅ ${this.arrows.length} flèches de debug créées - group.visible=${this.group.visible}, group.children=${this.group.children.length}`);
     }
     
     getObject(): THREE.Group {
@@ -390,7 +381,6 @@ export class DebugVisualizer {
     
     setVisible(visible: boolean): void {
         this.group.visible = visible;
-        console.log(`🔍 DebugVisualizer.setVisible(${visible}) - group.visible=${this.group.visible}, arrows=${this.arrows.length}`);
     }
     
     dispose(): void {
@@ -400,6 +390,176 @@ export class DebugVisualizer {
             arrow.cone.geometry.dispose();
             (arrow.cone.material as THREE.Material).dispose();
         });
+    }
+}
+
+/**
+ * Visualiseur de numéros de panneaux sur l'extrados du cerf-volant.
+ * Les numéros sont affichés comme des autocollants fixes parallèles aux faces.
+ */
+export class PanelNumbersVisualizer {
+    private group: THREE.Group;
+    private decals: THREE.Mesh[] = [];
+    
+    constructor() {
+        this.group = new THREE.Group();
+    }
+    
+    /**
+     * Crée une texture de numéro de panneau.
+     */
+    private createNumberTexture(number: number, color: string = '#ffff00'): THREE.CanvasTexture {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d')!;
+        
+        // Taille du canvas
+        canvas.width = 128;
+        canvas.height = 128;
+        
+        // Fond semi-transparent rond
+        context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        context.beginPath();
+        context.arc(64, 64, 60, 0, Math.PI * 2);
+        context.fill();
+        
+        // Bordure
+        context.strokeStyle = color;
+        context.lineWidth = 4;
+        context.beginPath();
+        context.arc(64, 64, 58, 0, Math.PI * 2);
+        context.stroke();
+        
+        // Numéro
+        context.font = 'Bold 64px Arial';
+        context.fillStyle = color;
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(number.toString(), 64, 64);
+        
+        // Créer texture
+        const texture = new THREE.CanvasTexture(canvas);
+        return texture;
+    }
+    
+    /**
+     * Crée un décal (autocollant) plat avec un numéro de panneau.
+     */
+    private createNumberDecal(number: number, color: string = '#ffff00'): THREE.Mesh {
+        // Créer un plan rectangulaire
+        const geometry = new THREE.PlaneGeometry(0.3, 0.3); // 30cm x 30cm
+        
+        // Matériau avec texture du numéro
+        const texture = this.createNumberTexture(number, color);
+        const material = new THREE.MeshBasicMaterial({
+            map: texture,
+            transparent: true,
+            side: THREE.DoubleSide, // Visible des deux côtés
+            depthTest: true,
+            depthWrite: false, // Pour éviter les conflits avec la surface du cerf-volant
+        });
+        
+        const decal = new THREE.Mesh(geometry, material);
+        return decal;
+    }
+    
+    /**
+     * Met à jour les numéros de panneaux sur l'extrados.
+     * Les numéros sont positionnés et orientés pour être parallèles aux faces.
+     */
+    update(kite: Kite): void {
+        const state = kite.getState();
+        const panelCount = kite.getPanelCount();
+        
+        // Si le nombre de panneaux a changé, recréer tous les décals
+        if (this.decals.length !== panelCount) {
+            // Nettoyer les décals existants
+            this.decals.forEach(decal => {
+                this.group.remove(decal);
+                decal.geometry.dispose();
+                (decal.material as THREE.MeshBasicMaterial).map?.dispose();
+                (decal.material as THREE.Material).dispose();
+            });
+            this.decals = [];
+            
+            // Créer les nouveaux décals
+            for (let i = 0; i < panelCount; i++) {
+                const decal = this.createNumberDecal(i + 1, '#ffff00');
+                this.decals.push(decal);
+                this.group.add(decal);
+            }
+        }
+        
+        // Mettre à jour la position et l'orientation du groupe pour suivre le cerf-volant
+        this.group.position.copy(state.position);
+        this.group.quaternion.copy(state.orientation);
+        
+        // Mettre à jour la position et l'orientation de chaque décal (en coordonnées locales)
+        for (let i = 0; i < panelCount; i++) {
+            const decal = this.decals[i];
+            
+            // Calculer le centroïde du panneau en coordonnées locales
+            const localCentroid = kite.geometry.getPanelCentroid(i);
+            
+            // Calculer la normale du panneau en coordonnées locales
+            const localNormal = kite.geometry.getPanelNormal(i);
+            
+            // Positionner le décal au centroïde du panneau (coordonnées locales du kite)
+            // Légèrement décalé vers l'extrados (côté normal)
+            const offset = 0.01; // 1cm au-dessus de la surface pour éviter le z-fighting
+            const decalPosition = localCentroid.clone().add(
+                localNormal.clone().multiplyScalar(offset)
+            );
+            decal.position.copy(decalPosition);
+            
+            // Orienter le décal comme un autocollant parallèle à la surface du panneau
+            // On calcule les vecteurs tangents à la surface pour définir l'orientation
+            const points = kite.geometry.getPanelPoints(i);
+            
+            if (points.length >= 3) {
+                // Calculer deux vecteurs tangents à la surface
+                const edge1 = new THREE.Vector3().subVectors(points[1], points[0]).normalize();
+                const edge2 = new THREE.Vector3().subVectors(points[2], points[0]).normalize();
+                
+                // Calculer la normale du panneau (produit vectoriel)
+                const panelNormal = new THREE.Vector3().crossVectors(edge1, edge2).normalize();
+                
+                // Créer une base orthonormée sur la surface du panneau
+                // On utilise edge1 comme direction "droite" (X local)
+                const right = edge1.clone();
+                // Calculer la direction "haut" (Y local) perpendiculaire à right et normal
+                const up = new THREE.Vector3().crossVectors(panelNormal, right).normalize();
+                
+                // Construire la matrice de rotation à partir de la base orthonormée
+                // Le décal (plan XY) sera aligné avec la surface du panneau
+                const matrix = new THREE.Matrix4();
+                matrix.makeBasis(right, up, panelNormal);
+                
+                // Extraire le quaternion de la matrice
+                const quaternion = new THREE.Quaternion();
+                quaternion.setFromRotationMatrix(matrix);
+                
+                decal.quaternion.copy(quaternion);
+            }
+        }
+    }
+    
+    getObject(): THREE.Group {
+        return this.group;
+    }
+    
+    setVisible(visible: boolean): void {
+        this.group.visible = visible;
+    }
+    
+    dispose(): void {
+        this.decals.forEach(decal => {
+            decal.geometry.dispose();
+            if ((decal.material as THREE.MeshBasicMaterial).map) {
+                (decal.material as THREE.MeshBasicMaterial).map!.dispose();
+            }
+            (decal.material as THREE.Material).dispose();
+        });
+        this.decals = [];
     }
 }
 

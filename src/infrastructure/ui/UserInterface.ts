@@ -20,6 +20,7 @@ export interface UICallbacks {
     onSimulationPause?: (paused: boolean) => void;
     onGeometryDebugToggle?: () => void;
     onForceVectorsToggle?: () => void;
+    onPanelNumbersToggle?: () => void;
 }
 
 /**
@@ -131,6 +132,21 @@ export class UserInterface {
                     cursor: pointer;
                     transition: all 0.2s;
                 ">⚡ FORCES</button>
+            </div>
+            
+            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                <button id="btn-panel-numbers" style="
+                    flex: 1;
+                    background: rgba(255, 255, 0, 0.1);
+                    border: 1px solid rgba(255, 255, 0, 0.3);
+                    color: #ffff00;
+                    padding: 10px;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                ">🔢 PANNEAUX</button>
             </div>
 
             <div style="margin-bottom: 15px;">
@@ -566,6 +582,7 @@ export class UserInterface {
         const resetBtn = document.getElementById('btn-reset');
         const geometryBtn = document.getElementById('btn-geometry');
         const forcesBtn = document.getElementById('btn-forces');
+        const panelNumbersBtn = document.getElementById('btn-panel-numbers');
 
         pauseBtn?.addEventListener('click', () => {
             this.callbacks.onSimulationPause?.(true);
@@ -587,6 +604,11 @@ export class UserInterface {
         forcesBtn?.addEventListener('click', () => {
             this.callbacks.onForceVectorsToggle?.();
             this.addLog('⚡ Vecteurs de forces basculés', 'info');
+        });
+        
+        panelNumbersBtn?.addEventListener('click', () => {
+            this.callbacks.onPanelNumbersToggle?.();
+            this.addLog('🔢 Numéros de panneaux basculés', 'info');
         });
 
         // Slider vitesse du vent

@@ -99,6 +99,9 @@ function bootstrap() {
             onForceVectorsToggle: () => {
                 simulation['toggleForceVectors']();
             },
+            onPanelNumbersToggle: () => {
+                simulation['togglePanelNumbers']();
+            },
         }
     );
     

@@ -1,6 +1,60 @@
 /**
  * Calculateur de force aérodynamique.
- * 
+ *    **Cas typiques à comprendre** :
+   - **Vol stable** : Équilibre des 3 forces, cerf-volant maintenu sur sphère de vol
+   - **Montée vers zénith** : Lignes égales, forces symétriques, le cerf-volant monte naturellement
+   - **Virage** : Asymétrie des tensions → couple de rotation → changement d'orientation
+   - **Plongée/remontée** : Le cerf-volant se déplace le long de la sphère de contrainte
+   
+   **Implication pour le code** : 
+   - Calculer les 3 forces dans leur géométrie réelle (aéro + gravité + lignes)
+   - Ne pas ajouter de logique artificielle pour "maintenir en l'air" ou "monter au zénith"
+   - Les comportements corrects émergent naturellement de la physique
+   - Le cerf-volant doit toujours regarder vers la station (face avant vers Z-)
+
+   **C'est un cerf-volant, pas un avion** ⚠️
+   
+   **Différence fondamentale** : Un cerf-volant est un **système contraint** par des lignes, contrairement à un avion libre.
+   
+   **Principes physiques du cerf-volant :**
+   - Le cerf-volant est **attaché par des lignes** à la station de pilotage (origine)
+   - Il **regarde toujours vers le vent** : la face avant (intrados, où sont les points de contrôle) fait face à Z+
+   - Il vole **"face au vent"** = dans l'hémisphère Z+ (le vent vient de Z+ et souffle vers Z-)
+   - Il est **contraint sur une sphère** de rayon = longueur des lignes + brides
+   - La **portance est créée par l'angle des surfaces** vis-à-vis du vent apparent
+   - Le pilotage se fait par **différence de longueur** entre lignes gauche/droite (asymétrie des forces)
+   
+   **Comportements émergents** (résultant de la physique, pas à implémenter directement) :
+   - **Équilibre au zénith** : Avec lignes égales, le cerf-volant tend naturellement vers le zénith (Z=0, Y=max)
+   - **Structure tangente à la sphère** : La barre de structure (nez → spine_bas) devient tangente à la sphère de vol
+   
+   **Géométrie des forces critiques** :
+   ```typescript
+   // L'équilibre dépend de la géométrie complète :
+   // Force_resultante = Force_aero + Force_gravite + Force_lignes
+   
+   // La portance n'est PAS une force de sustentation comme pour un avion
+   // Elle est générée par l'angle des surfaces par rapport au vent apparent
+   // Elle contribue à la tension dans les lignes qui contraignent le cerf-volant
+   
+   // Exemple : Cerf-volant nez vers le bas (plongée)
+   // - Portance générée selon l'angle des surfaces avec le vent apparent
+   // - Force de gravité vers le bas
+   // - Force des lignes vers la station de pilotage
+   // - Résultante : mouvement sur la sphère de contrainte
+   ```
+   
+   **Cas typiques à comprendre** :
+   - **Vol stable** : Équilibre des 3 forces, cerf-volant maintenu sur sphère de vol
+   - **Montée vers zénith** : Lignes égales, forces symétriques, le cerf-volant monte naturellement
+   - **Virage** : Asymétrie des tensions → couple de rotation → changement d'orientation
+   - **Plongée/remontée** : Le cerf-volant se déplace le long de la sphère de contrainte
+   
+   **Implication pour le code** : 
+   - Calculer les 3 forces dans leur géométrie réelle (aéro + gravité + lignes)
+   - Ne pas ajouter de logique artificielle pour "maintenir en l'air" ou "monter au zénith"
+   - Les comportements corrects émergent naturellement de la physique
+   - Le cerf-volant doit toujours regarder vers la station (face avant vers Z-)
  * @module domain/physics/forces/AerodynamicForce
  */
 
@@ -131,10 +185,12 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         const panelNormal = this.kite.getGlobalPanelNormal(panelIndex);
         const panelArea = this.kite.getPanelArea(panelIndex);
 
-        // Composante du vent sur la normale du panneau
-        // windDirection = direction où VA le vent (de Z- vers Z+)
-        // Le kite regarde vers Z- (vers le pilote), donc son intrados fait face à Z-
-        // Le vent arrive de Z- (derrière le kite), donc windDirection et normale sont opposés
+        // 🔧 CORRECTION: Composante du vent sur la normale du panneau
+        // windDirection = direction où VA le vent (de Z+ vers Z-)
+        // Le kite regarde vers Z+ (face au vent), donc son intrados (face avant) fait face à Z+
+        // Le vent arrive de Z+ et va vers Z-, donc windDirection pointe vers Z-
+        // Quand le vent frappe l'intrados : normalWindComponent > 0 (normale et vent colinéaires)
+        // Quand le vent frappe l'extrados : normalWindComponent < 0 (normale et vent opposés)
         const normalWindComponent = panelNormal.dot(windDirection);
 
         // Angle d'attaque basé sur la valeur absolue (pour les courbes Cl/Cd standards)

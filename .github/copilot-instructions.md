@@ -1,415 +1,140 @@
 # Instructions Copilot - Simulateur de Cerf-Volant Physique
 
-## Vue d'ensemble du projet
+## ⛔ RÈGLE ABSOLUE - NON NÉGOCIABLE
 
-Ce projet est un **simulateur de cerf-volant acrobatique** avec physique avancée et autopilotage, construit avec **Three.js** et **TypeScript**. La simulation calcule les forces aérodynamiques, tensions des lignes, et permet un pilotage manuel ou automatique via 7 modes d'autopilotage avec contrôleurs PID.
+**NE JAMAIS DÉMARRER DE SERVEUR DE DÉVELOPPEMENT (`npm run dev`, `npm start`, etc.)**
 
-**Points clés :**
-- Simulation physique temps réel (60 FPS) avec intégration de Verlet
-- **Clean Architecture** : 4 couches découplées (Core, Domain, Application, Infrastructure)
-- Architecture modulaire avec **injection de dépendances** et **principes SOLID**
-- Système de coordonnées : Z+ = direction du vent (vers Z-), Y+ = altitude, X+ = axe latéral
-- Tout le code et commentaires sont en **français**
+Le serveur Vite est **TOUJOURS déjà en cours d'exécution** en arrière-plan avec hot reload automatique.
+- ✅ Les modifications de code sont **automatiquement rechargées** dans le navigateur
+- ❌ **INTERDICTION FORMELLE** de lancer `npm run dev` ou tout autre serveur
+- ❌ **INTERDICTION FORMELLE** d'utiliser `run_in_terminal` pour démarrer un serveur
+- Si l'utilisateur demande de tester : simplement confirmer que les changements sont automatiquement pris en compte
 
-## Architecture Clean (4 Couches)
+**En cas de doute** : demander à l'utilisateur plutôt que de lancer un serveur.
 
-### Structure Générale
+## Vue d'ensemble
+
+**Simulateur de cerf-volant acrobatique** avec physique temps réel (60 FPS) et autopilotage, en **TypeScript + Three.js**.
+
+**Architecture :**
+- **Clean Architecture** 4 couches : Core (orchestration) → Domain (physique pure) → Application (autopilote/logs) → Infrastructure (rendu/UI)
+- **Injection de dépendances** partout, principes SOLID
+- **Point d'entrée** : `src/index.tsx` → `NewSimulation` (dans `Simulation.ts`)
+- Code et commentaires en **français**
+
+**Physique :**
+- Forces : Aérodynamique (par panneau) + Gravité + Lignes (bi-régime)
+- Intégration Verlet avec timestep fixe 1/60s
+- **Système coordonnées** : X+ droite, Y+ altitude, Z+ origine vent (souffle vers Z-)
+- **Cerf-volant** face au vent (intrados vers Z+), attaché par lignes à origine
+
+## Architecture (4 Couches)
 
 ```
 src/
-├── core/               # Orchestration et configuration
-│   ├── Simulation.ts
-│   ├── SimulationConfig.ts
-│   └── types/
-│       ├── Events.ts
-│       └── PhysicsState.ts
+├── core/               # Orchestration + Config
+│   ├── Simulation.ts   # NewSimulation (boucle principale)
+│   ├── SimulationConfig.ts  # SOURCE UNIQUE DE VÉRITÉ
+│   └── types/          # Events, PhysicsState
 │
 ├── domain/            # Logique métier pure
-│   ├── kite/
-│   └── physics/
+│   ├── kite/          # Kite, KiteGeometry
+│   └── physics/       # PhysicsEngine, forces/, integrators/
 │
-├── application/       # Cas d'usage et contrôle
-│   ├── logging/
-│   └── control/autopilot/
+├── application/       # Services métier
+│   ├── logging/       # Logger (buffer circulaire)
+│   └── control/autopilot/  # PIDController, 7 modes
 │
-└── infrastructure/    # Détails techniques (rendu, UI)
-    ├── rendering/
-    └── ui/
+└── infrastructure/    # Adaptateurs techniques
+    ├── rendering/     # Renderer, Camera, visualizers/
+    └── ui/           # UserInterface (HTML/CSS)
 ```
 
-### CORE - Orchestration (`src/core/`)
+### Fichiers Critiques
 
-**Point d'entrée unique** : `src/index.tsx` → initialise `NewSimulation`
+**Core :**
+- `SimulationConfig.ts` : **TOUTES les constantes** (PhysicsConfig, KiteConfig, LinesConfig, etc.). Jamais de valeurs en dur ailleurs.
+- `Simulation.ts` : Boucle `animate()` → Commandes → `physicsEngine.update()` → Synchro visuelle → Rendu
 
-1. **`Simulation.ts`** - Chef d'orchestre avec injection de dépendances
-   - Boucle d'animation principale (`animate()`)
-   - Séquence critique à chaque frame :
-     1. Calcul des commandes (utilisateur/autopilote)
-     2. Mise à jour physique (`physicsEngine.update()`)
-     3. Synchronisation visuelle (position, orientation)
-     4. Rendu (`renderer.render()`)
-   - Architecture événementielle avec `EventBus`
-   - Gestion centralisée de tous les sous-systèmes
+**Domain/Physics :**
+- `PhysicsEngine.ts` : Orchestration forces + intégration. **Ordre strict** : Aéro → Gravité → Lignes
+- `forces/LineForce.ts` : **ZONE CRITIQUE** - Modèle bi-régime avec lissage temporel
+- `integrators/VerletIntegrator.ts` : Intégration numérique stable
 
-2. **`SimulationConfig.ts`** - Configuration centralisée typée
-   - **SOURCE UNIQUE DE VÉRITÉ** pour toutes les constantes
-   - Interfaces TypeScript strictes : `PhysicsConfig`, `KiteConfig`, `WindConfig`, etc.
-   - Configuration par défaut : `DEFAULT_CONFIG`
-   - **Toujours utiliser la config injectée**, jamais de constantes en dur
+**Application :**
+- `autopilot/modes/AutoPilotModes.ts` : 7 modes (Manual, Stabilization, AltitudeHold, PositionHold, Zenith, CircularTrajectory, Acrobatic)
 
-3. **`types/PhysicsState.ts`** - État normalisé
-   - `KitePhysicsState` : Position, vitesse, orientation, vitesse angulaire
-   - `WindState` : Vitesse et direction du vent
-   - `Forces` : Aérodynamique, gravité, lignes, totale + couple
-   - `SimulationState` : État complet du système
+**Infrastructure :**
+- `rendering/Camera.ts` : 4 modes (ORBIT, FREE, FOLLOW, CINEMATIC)
+- `ui/UserInterface.ts` : Panneau HTML + callbacks
 
-4. **`types/Events.ts`** - EventBus et événements
-   - Pattern Observer pour communication découplée
-   - Types d'événements : `StateChanged`, `ConfigUpdated`, `SimulationReset`
+## Conventions Essentielles
 
-### DOMAIN - Logique Métier (`src/domain/`)
+### ⚠️ Configuration Centralisée : `SimulationConfig.ts`
 
-**Indépendant de toute infrastructure** - Logique métier pure
+**SOURCE UNIQUE DE VÉRITÉ** - Jamais de constantes en dur ailleurs.
 
-#### Cerf-Volant (`domain/kite/`)
+Interfaces : `PhysicsConfig`, `KiteConfig`, `LinesConfig`, `ControlConfig`, `WindConfig`, `RenderingConfig`, `UIConfig`, `LoggingConfig`
 
-- **`Kite.ts`** - Entité métier + Factory
-  - Contient l'état physique (`KitePhysicsState`)
-  - Fournit l'objet 3D via `getObject3D()`
-  - Factory : `KiteFactory.createFromConfig()`
-  
-- **`KiteGeometry.ts`** - Géométrie pure du cerf-volant
-  - Points structurels : NEZ, BORD_GAUCHE/DROIT, CTRL_GAUCHE/DROIT
-  - 4 panneaux avec normales cohérentes (règle main droite)
-  - Calcul des brides par **trilatération 3D**
-  - Paramètres : envergure, hauteur, longueurs de brides
+Accès : Toujours via `this.config` injecté ou `DEFAULT_CONFIG`.
 
-#### Physique (`domain/physics/`)
-
-**Le moteur physique calcule 3 forces dans cet ordre** :
+### Injection de Dépendances (OBLIGATOIRE)
 
 ```typescript
-// 1. Forces aérodynamiques (par panneau)
-forcesAero = aerodynamicCalculator.calculate(state, wind, geometry)
+// ✅ Correct
+constructor(
+    private integrator: IIntegrator,
+    private forceManager: ForceManager
+) { }
 
-// 2. Force de gravité
-forceGravite = gravityCalculator.calculate(state, config)
-
-// 3. Forces des lignes (ressort-amortisseur bi-régime)
-{ force, torque } = lineForceCalculator.calculate(state, delta, baseLength)
+// ❌ Incorrect - Couplage fort
+private integrator = new VerletIntegrator();
 ```
 
-**Fichiers critiques :**
+### Système de Coordonnées (CRITIQUE)
 
-- **`PhysicsEngine.ts`** - Orchestrateur de la physique
-  - Coordonne `ForceManager` + `Integrator`
-  - Appelle l'intégration (Verlet) avec les forces totales
-  - Applique les limites de sécurité (vitesse max, vitesse angulaire max)
-  - Cache les dernières forces pour debug (`lastForces`)
-  - Méthode principale : `update(deltaTime, controlDelta): SimulationState`
-
-- **`forces/ForceCalculator.ts`** - Interfaces et Manager
-  - `IForceCalculator` : Interface de base
-  - `IAerodynamicForceCalculator`, `IGravityForceCalculator`, `ILineForceCalculator`
-  - `ForceManager` : Agrège tous les calculateurs de forces
-  - Pattern Composite pour combiner les forces
-
-- **`forces/AerodynamicForce.ts`** - Calculs aérodynamiques par panneau
-  - Angle d'attaque : `α = arcsin(|normale · vent_direction|)`
-  - Portance : `L = 0.5 × ρ × v² × S × Cl(α)`
-  - Traînée : `D = 0.5 × ρ × v² × S × Cd(α)`
-  - Calcul pour chaque panneau + agrégation
-
-- **`forces/GravityForce.ts`** - Force de gravité simple
-  - `F = m × g × (0, -1, 0)`
-
-- **`forces/LineForce.ts`** - **ZONE CRITIQUE** Forces des lignes
-  - Modèle bi-régime :
-    - **Régime 1** (distance < repos) : tension minimale
-    - **Régime 2** (distance ≥ repos) : `F = k×Δl + c×v` avec lissage
-  - Lissage temporel : `tension_lissée = α × tension_nouvelle + (1-α) × tension_ancienne`
-  - Calcul du couple (torque) pour rotation
-  - **Important** : Appeler `resetSmoothedTensions()` lors des resets
-
-- **`integrators/Integrator.ts`** - Interface pour intégrateurs
-  - `IIntegrator.integrate(state, totalForce, totalTorque, deltaTime)`
-
-- **`integrators/VerletIntegrator.ts`** - Intégration de Verlet
-  - Intégration numérique stable pour physique temps réel
-  - Amortissement configurable via `dampingFactor`
-  - Limites de vitesse et vitesse angulaire
-
-### APPLICATION - Cas d'Usage (`src/application/`)
-
-#### Logging (`application/logging/`)
-
-- **`Logger.ts`** - Système de logs avec buffer circulaire
-  - Buffer de taille configurable (défaut 8 entrées)
-  - Format structuré : timestamp + rapport multi-lignes
-  - Niveaux : DEBUG, INFO, WARN, ERROR
-
-#### Autopilote (`application/control/autopilot/`)
-
-- **`PIDController.ts`** - Contrôleur PID générique
-  - Calcul : `commande = Kp×e + Ki×∫e·dt + Kd×de/dt`
-  - Anti-windup : limites sur terme intégral
-  - Configuration : `{ Kp, Ki, Kd, integralLimit, outputLimit }`
-  - Méthodes : `calculate(error, timestamp)`, `reset()`
-
-- **`modes/AutoPilotModes.ts`** - 7 modes d'autopilotage (Strategy pattern)
-  - Interface `IAutoPilotMode` : `calculate()`, `getInfo()`, `reset()`, `name`
-  - **Modes implémentés** :
-    1. `ManualMode` - Contrôle manuel pur
-    2. `StabilizationMode` - Stabilise orientation
-    3. `AltitudeHoldMode` - Maintient altitude
-    4. `PositionHoldMode` - Maintient position 3D
-    5. `ZenithMode` - Monte au zénith (position cible au-dessus station)
-    6. `CircularTrajectoryMode` - Trajectoire circulaire
-    7. `AcrobaticMode` - Figures acrobatiques (à implémenter)
-  - Extension : Créer nouvelle classe implémentant `IAutoPilotMode`
-
-### INFRASTRUCTURE - Détails Techniques (`src/infrastructure/`)
-
-#### Rendu 3D (`infrastructure/rendering/`)
-
-- **`Renderer.ts`** - Wrapper Three.js
-  - Initialise WebGLRenderer avec config
-  - Gestion du redimensionnement automatique
-  - Méthode principale : `render(scene, camera)`
-  - Nettoyage : `dispose()`
-
-- **`Scene3D.ts`** - Scène 3D avec éléments de base
-  - Crée THREE.Scene
-  - Ajoute grille de référence (configurable)
-  - Éclairage : ambient + directionnel
-  - Méthode : `getScene()`, `add()`, `remove()`
-
-- **`Camera.ts`** - Caméra avancée avec 4 modes
-  - **Modes** : `ORBIT`, `FREE`, `FOLLOW`, `CINEMATIC`
-  - Contrôles souris : rotation, zoom, pan
-  - Contrôles clavier : déplacement libre
-  - Configuration : position, lookAt, FOV, distances min/max
-  - **ORBIT** (défaut) : Rotation autour d'un point cible
-  - **FOLLOW** : Suit le cerf-volant avec offset configurable
-  - **FREE** : Déplacement libre dans l'espace
-  - **CINEMATIC** : Interpolation fluide de points de vue
-  - Méthodes : `update(deltaTime, target?)`, `setMode()`, `getCamera()`
-
-- **`materials/MaterialFactory.ts`** - Factory de matériaux Three.js
-  - Matériaux prédéfinis : cerf-volant, lignes, debug, grille
-  - Pattern Factory pour centraliser création
-  - Facilite modification visuelle globale
-
-- **`visualizers/KiteVisualizer.ts`** - Visualisation du cerf-volant
-  - Crée géométrie 3D du cerf-volant (4 panneaux)
-  - Applique matériaux et textures
-  - Met à jour position/orientation depuis état physique
-  - Mode debug : affiche normales des panneaux
-
-- **`visualizers/VisualizersBundle.ts`** - Autres visualiseurs
-  - `LinesVisualizer` : Lignes gauche/droite avec `LineBasicMaterial`
-  - `TrajectoryVisualizer` : Trace trajectoire (buffer circulaire de points)
-  - `DebugVisualizer` : Vecteurs de force (aéro, gravité, lignes)
-  - `ControlStationVisualizer` : Points de contrôle gauche/droite au sol
-  - Tous implémentent : `update(state)`, `show()`, `hide()`, `dispose()`
-
-#### Interface Utilisateur (`infrastructure/ui/`)
-
-- **`UserInterface.ts`** - Panneau de contrôle HTML/CSS
-  - Panneaux : debug, contrôles, logs
-  - Callbacks pour actions utilisateur (pause, reset, changement de mode)
-  - Mise à jour temps réel : position, vitesse, forces, mode autopilote
-  - Indicateurs visuels : mode pilotage, état simulation
-  - Styled avec `UserInterface.css`
-
-## Conventions de développement
-
-### ⚠️ RÈGLE CRITIQUE : Éviter les doublons et duplication de code
-
-**Avant d'implémenter une nouvelle fonctionnalité, TOUJOURS :**
-
-1. **Vérifier si elle existe déjà** dans le projet
-   - Utiliser la recherche de code (grep, semantic search)
-   - Consulter l'architecture documentée ci-dessus
-   - Vérifier les fichiers de configuration existants
-
-2. **Évaluer l'existant avant de créer du nouveau**
-   - Si la fonctionnalité existe → L'utiliser directement
-   - Si elle existe mais est incomplète → L'améliorer sur place
-   - Si elle existe mais est mal implémentée → La refactoriser, ne pas dupliquer
-
-3. **Une seule approche par fonctionnalité**
-   - Pas de doublons de configuration (ex: styles inline + CSS externe)
-   - Pas de classes dupliquées avec des noms différents
-   - Pas de logique métier répartie en plusieurs endroits
-
-4. **En cas de conflit entre deux implémentations**
-   - Identifier la source unique de vérité (généralement la plus récente ou la mieux architecturée)
-   - Supprimer ou migrer vers l'implémentation choisie
-   - Documenter le choix dans un commentaire si nécessaire
-
-**Exemple de vérification** :
 ```typescript
-// ❌ AVANT de créer un nouveau système de log
-// VÉRIFIER d'abord : Existe-t-il déjà un Logger ?
-// → Oui : application/logging/Logger.ts
+// Repère : X+ droite, Y+ altitude, Z+ origine vent (souffle vers Z-)
+// Pilote à (0,0,0) regarde Z+, cerf-volant en Z+ face au vent
 
-// ❌ AVANT de créer un nouveau panneau UI
-// VÉRIFIER d'abord : Le panneau existe-t-il dans UserInterface.ts ?
-// → Si oui : modifier l'existant, ne pas dupliquer
+// Vent : vient de Z+, souffle vers Z- (vers pilote)
+windState.velocity = new THREE.Vector3(0, 0, -windSpeed);
+windState.direction = new THREE.Vector3(0, 0, -1);
 
-// ❌ AVANT d'ajouter des styles inline
-// VÉRIFIER d'abord : Existe-t-il un fichier CSS dédié ?
-// → Oui : UserInterface.css → utiliser celui-ci
+// Cerf-volant : position Z+ (ex: 0, 8, 8), face au vent
+// Orientation initiale : -15° sur X (nez bas), PAS de rotation 180° sur Y
+const orientationInitiale = new THREE.Quaternion()
+    .setFromAxisAngle(new THREE.Vector3(1, 0, 0), -15 * Math.PI / 180);
 ```
 
-**Principe** : **DRY (Don't Repeat Yourself)** - Une seule source de vérité pour chaque concept.
+**⚠️ Intrados (face avant) DOIT recevoir le vent pour portance** (voir `CORRECTION_ORIENTATION.md`)
 
-### Configuration centralisée
-
-**⚠️ SOURCE UNIQUE DE VÉRITÉ : `src/core/SimulationConfig.ts`**
-
-Toutes les constantes du projet sont centralisées dans `SimulationConfig.ts` :
-- `PhysicsConfig` : Masse, gravité, amortissement, limites de vitesse
-- `LinesConfig` : Raideur, amortissement, tensions, lissage
-- `ControlConfig` : Delta max, vitesses de pilotage
-- `KiteConfig` : Géométrie et propriétés aérodynamiques du cerf-volant
-- `WindConfig` : Vitesse et direction par défaut
-- `UIConfig` : Intervalles de log, taille des buffers
-- `RenderingConfig` : Paramètres de rendu 3D (FOV, near/far, clearColor)
-- `LoggingConfig` : Configuration du système de logging
-
-La configuration utilise des **interfaces TypeScript** pour garantir le typage strict et l'injection de dépendances.
-La configuration par défaut est définie dans `DEFAULT_CONFIG`.
-
-**Ne jamais définir de constantes en dur** - toujours utiliser la configuration injectée ou `DEFAULT_CONFIG`.
-
-### Injection de dépendances
-
-**Pattern central** : Toutes les dépendances sont injectées via constructeur
+### EventBus Pattern
 
 ```typescript
-// ✅ Correct - Injection de dépendances
-export class PhysicsEngine {
-    constructor(
-        private kite: Kite,
-        private integrator: IIntegrator,
-        private forceManager: ForceManager,
-        private windState: WindState,
-        config?: Partial<PhysicsEngineConfig>
-    ) { ... }
-}
+// Émettre
+this.eventBus.emit(SimulationEventType.StateChanged, { state, timestamp });
 
-// ❌ Incorrect - Instanciation directe
-export class PhysicsEngine {
-    private integrator = new VerletIntegrator(); // Couplage fort !
-}
+// Écouter
+this.eventBus.on(SimulationEventType.ConfigUpdated, (data) => {...});
 ```
 
-**Avantages** :
-- Testabilité maximale (injection de mocks)
-- Découplage complet entre couches
-- Inversion de contrôle (IoC)
+### Nommage
 
-### Système de coordonnées et orientation
+- Classes : `PascalCase` (ex: `PhysicsEngine`)
+- Méthodes : `camelCase` (ex: `update`, `calculate`)
+- Constantes : `UPPER_SNAKE_CASE` (ex: `DEFAULT_CONFIG`)
+- Interfaces : Préfixe `I` (ex: `IIntegrator`)
 
-```typescript
-// Repère global :
-// X+ : Axe latéral (vers la droite du pilote)
-// Y+ : Altitude (vers le haut)
-// Z+ : Direction où va le vent (le vent souffle de Z- vers Z+)
-// Z- : Direction d'où vient le vent (origine du vent)
-
-// Convention du cerf-volant :
-// - Le pilote est à l'origine (0, 0, 0) et regarde vers Z+ (direction du vent)
-// - Le cerf-volant vole "sous le vent" = en Z+ (hémisphère Z+ par rapport au pilote)
-// - Le cerf-volant REGARDE TOUJOURS VERS LE PILOTE (face avant vers Z-)
-// - LEFT (gauche) = X négatif (X-)
-// - RIGHT (droite) = X positif (X+)
-// - Extrados : face supérieure du cerf-volant
-// - Intrados : face inférieure (face avant qui reçoit le vent)
-
-// Vecteur vent dans le code :
-// windState.velocity = new THREE.Vector3(0, 0, windSpeed) // Vent va vers Z+
-// windState.direction = new THREE.Vector3(0, 0, 1) // Direction normalisée vers Z+
-
-// Orientation initiale (voir Simulation.reset()) :
-const orientationInitiale = new THREE.Quaternion();
-const axeRotation = new THREE.Vector3(0, 1, 0); // Rotation autour de Y
-orientationInitiale.setFromAxisAngle(axeRotation, Math.PI); // 180°
-// Rotation 180° sur Y : le cerf-volant fait face vers Z- (vers la station de pilotage)
-// L'intrados (face avant) reçoit le vent venant de Z-
-
-// Position initiale :
-initialState.position.set(0, 2, 10); // 10m sous le vent (en Z+), à 2m d'altitude
-// Le cerf-volant est dans l'hémisphère Z+ (sous le vent), attaché par des lignes au pilote
-```
-
-### EventBus - Communication découplée
+### Gestion Mémoire Three.js
 
 ```typescript
-// Publication d'événement
-this.eventBus.emit(SimulationEventType.StateChanged, { 
-    state: newState,
-    timestamp: Date.now() 
-});
-
-// Écoute d'événement
-this.eventBus.on(SimulationEventType.ConfigUpdated, (data) => {
-    this.handleConfigChange(data.config);
-});
-
-// Types d'événements disponibles :
-// - StateChanged : État physique mis à jour
-// - ConfigUpdated : Configuration modifiée
-// - SimulationReset : Simulation réinitialisée
-// - PauseToggled : Pause activée/désactivée
-```
-
-### Gestion de la mémoire
-
-- **Toujours** appeler `dispose()` sur les géométries/matériaux Three.js
-- Voir `NewSimulation.dispose()` pour pattern de nettoyage complet
-- Pattern de nettoyage : Visualiseurs → Renderer → EventBus
-- Désactiver frustum culling pour lignes : `ligne.frustumCulled = false`
-
-```typescript
-// Pattern de dispose complet
 dispose(): void {
-    // 1. Nettoyer visualiseurs
-    this.kiteVisualizer.dispose();
-    this.linesVisualizer.dispose();
-    // ... autres visualiseurs
-    
-    // 2. Nettoyer renderer
+    this.kiteVisualizer.dispose();  // Géométries/matériaux
     this.renderer.dispose();
-    
-    // 3. Nettoyer eventBus
     this.eventBus.clear();
 }
 ```
-
-### Patterns de logging
-
-```typescript
-// Logging avec Logger (couche Application)
-const logger = new Logger(bufferSize);
-
-logger.log('INFO', 'Simulation démarrée');
-logger.log('DEBUG', `Position: ${position.x}, ${position.y}, ${position.z}`);
-
-// Récupération des logs
-const allLogs = logger.getLogs();
-const lastN = logger.getLogs(5); // 5 derniers logs
-```
-
-### Conventions de nommage
-
-- Classes : `PascalCase` (ex: `PhysicsEngine`, `Kite`, `NewSimulation`)
-- Méthodes : `camelCase` (ex: `update`, `calculate`, `getState`)
-- Constantes : `UPPER_SNAKE_CASE` (ex: `MAX_VELOCITY`, `DEFAULT_CONFIG`)
-- Interfaces : Préfixe `I` pour les contrats (ex: `IIntegrator`, `IAutoPilotMode`)
-- Types : `PascalCase` sans préfixe (ex: `SimulationState`, `Forces`)
 
 ## Workflows de développement
 
@@ -428,7 +153,7 @@ npm run preview # Prévisualise le build
 **Pas de tests automatisés** - développement itératif avec observation visuelle :
 
 1. Activer mode debug : `kite.toggleDebug(true)` (activé par défaut dans `NewSimulation`)
-2. Observer en temps réel dans le navigateur (Vite hot reload automatique sur `npm run dev`)
+2. Observer en temps réel dans le navigateur (Vite hot reload automatique)
 3. Consulter forces dans `PhysicsEngine.getLastForces()` pour debug
 4. **Surveiller tensions lignes** : via `DebugVisualizer` ou logs
    - Tensions normales : 0.5N à 20N selon vent
@@ -485,7 +210,14 @@ Le système de lignes est le **point sensible majeur** du projet - équilibre d�
 - `stiffness` (k) et `damping` (c) : Respecter c ≈ 2√(k×m) pour amortissement critique
 - `smoothingCoefficient` (0.3-0.5) : Plus bas = plus stable mais moins réactif
 - `restLengthRatio` (0.99) : Définit la pré-tension, ne pas toucher sans tests approfondis
-- `PhysicsConfig.dampingFactor` (0.99) : Ne pas descendre sous 0.95
+- `PhysicsConfig.dampingFactor` (0.9999) : Quasi-1.0, pas d'amortissement artificiel global
+
+**Valeurs actuelles validées** (voir `CORRECTION_LIGNES_RIGIDES.md`) :
+- `stiffness: 2000 N/m` - Compromis réalisme/stabilité (théorique 5000 N/m nécessiterait 200+ FPS)
+- `damping: 10 Ns/m` - Amortissement ζ=0.22 (sous-amorti)
+- `smoothingCoefficient: 0.8` - Lissage maximal pour stabilité
+- `exponentialThreshold: 0.3 m` - Protection dès 3% d'allongement
+- `exponentialStiffness: 500 N` - Protection forte contre explosion
 
 **Méthodologie de modification** :
 1. **Modifier uniquement dans `SimulationConfig.ts`** - source unique de vérité
@@ -507,8 +239,8 @@ Toutes les constantes physiques sont documentées dans `SimulationConfig.ts`.
    
    **Principes physiques du cerf-volant :**
    - Le cerf-volant est **attaché par des lignes** à la station de pilotage (origine)
-   - Il **regarde toujours vers le pilote** : la face avant (où sont les points de contrôle) fait face à la station
-   - Il vole **"sous le vent"** = dans l'hémisphère Z+ (le vent va de Z- vers Z+)
+   - Il **regarde toujours vers le vent** : la face avant (intrados, où sont les points de contrôle) fait face à Z+
+   - Il vole **"face au vent"** = dans l'hémisphère Z+ (le vent vient de Z+ et souffle vers Z-)
    - Il est **contraint sur une sphère** de rayon = longueur des lignes + brides
    - La **portance est créée par l'angle des surfaces** vis-à-vis du vent apparent
    - Le pilotage se fait par **différence de longueur** entre lignes gauche/droite (asymétrie des forces)
@@ -579,8 +311,11 @@ Toutes les constantes physiques sont documentées dans `SimulationConfig.ts`.
 ### Documentation de référence
 
 - **README.md** : Architecture, installation, utilisation
-- **MIGRATION_COMPLETE.md** : Historique de migration vers Clean Architecture
-- **AUDIT_ARCHITECTURAL.md** : Rapport d'audit détaillé de l'architecture
+- **STATUS.md** : Statut actuel du projet et commandes rapides
+- **DIAGNOSTIC_PHYSIQUE.md** : Diagnostic des problèmes physiques et ordres de grandeur
+- **CORRECTION_LIGNES_RIGIDES.md** : Correction critique de la raideur des lignes (k=2000 N/m)
+- **CORRECTION_ORIENTATION.md** : Correction de l'orientation du cerf-volant (face au vent)
+- **VALEURS_PHYSIQUES.md** : Toutes les valeurs physiques réelles et leur justification
 - **.github/copilot-instructions.md** : Ce fichier - Guide pour développeurs
 
 ## Intégrations externes

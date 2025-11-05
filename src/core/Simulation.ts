@@ -29,7 +29,8 @@ import {
     TrajectoryVisualizer, 
     DebugVisualizer,
     ControlStationVisualizer,
-    GeometryLabelsVisualizer
+    GeometryLabelsVisualizer,
+    PanelNumbersVisualizer
 } from '../infrastructure/rendering/visualizers/VisualizersBundle';
 
 // Application
@@ -72,6 +73,7 @@ export class NewSimulation {
     private debugVisualizer: DebugVisualizer;
     private controlStationVisualizer: ControlStationVisualizer;
     private geometryLabelsVisualizer: GeometryLabelsVisualizer;
+    private panelNumbersVisualizer: PanelNumbersVisualizer;
     
     // Contrôle
     private currentDelta = 0;
@@ -116,12 +118,11 @@ export class NewSimulation {
         const initialState = createInitialState();
         initialState.position.set(0, 2, 10); // Z=+10 : kite "sous le vent" dans l'hémisphère Z+
         
-        // Orientation initiale : rotation 180° sur Y pour que le kite regarde vers Z- (vers la station de pilotage)
-        // puis inclinaison -15° sur X pour angle d'attaque optimal
-        // Note: Le kite vole en Z+ mais regarde toujours vers le pilote (face avant vers Z-)
-        const rotationY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+        // 🔧 CORRECTION: Le kite regarde vers Z+ (face au vent) avec inclinaison pour angle d'attaque
+        // Pas de rotation 180° sur Y - le kite fait naturellement face au vent venant de Z+
+        // Inclinaison -15° sur X pour angle d'attaque optimal (nez légèrement plus bas)
         const rotationX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -15 * Math.PI / 180);
-        initialState.orientation.multiplyQuaternions(rotationY, rotationX);
+        initialState.orientation.copy(rotationX);
         
         this.kite = KiteFactory.createStandard(initialState);
         
@@ -147,14 +148,14 @@ export class NewSimulation {
         ));
         
         // Créer le PhysicsEngine d'abord (sans lineCalculator pour l'instant)
-        // Le vent va de Z- vers Z+ (pousse le kite vers Z+)
+        // 🔧 CORRECTION: Le vent va de Z+ vers Z- (souffle vers le pilote, frappe l'intrados du kite)
         this.physicsEngine = new PhysicsEngine(
             this.kite,
             integrator,
             forceManager,
             {
-                velocity: new THREE.Vector3(0, 0, this.config.wind.speed),
-                direction: new THREE.Vector3(0, 0, 1),
+                velocity: new THREE.Vector3(0, 0, -this.config.wind.speed), // Vent vers Z-
+                direction: new THREE.Vector3(0, 0, -1), // Direction vers Z-
                 speed: this.config.wind.speed,
                 turbulence: this.config.wind.turbulence,
             },
@@ -171,6 +172,7 @@ export class NewSimulation {
         this.debugVisualizer = new DebugVisualizer();
         this.controlStationVisualizer = new ControlStationVisualizer();
         this.geometryLabelsVisualizer = new GeometryLabelsVisualizer();
+        this.panelNumbersVisualizer = new PanelNumbersVisualizer();
         
         // Récupérer positions treuils pour initialiser le calculateur de lignes
         const winchPositions = this.controlStationVisualizer.getWinchPositions();
@@ -215,9 +217,11 @@ export class NewSimulation {
         this.scene.add(this.debugVisualizer.getObject());
         this.scene.add(this.controlStationVisualizer.getObject3D());
         this.scene.add(this.geometryLabelsVisualizer.getObject());
+        this.scene.add(this.panelNumbersVisualizer.getObject());
         
         // Configurer visibilité debug
         this.debugVisualizer.setVisible(this.config.rendering.showDebug);
+        this.panelNumbersVisualizer.setVisible(true); // Visible par défaut
         
         // 6. Configurer événements
         this.setupEventListeners();
@@ -339,17 +343,15 @@ export class NewSimulation {
             state.velocity.set(0, 0, 0);
             state.angularVelocity.set(0, 0, 0);
             
-            // Orientation : rotation 180° sur Y pour que le kite regarde vers Z- (vers la station)
-            // puis inclinaison -15° sur X pour angle d'attaque optimal
-            const rotationY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+            // 🔧 CORRECTION: Le kite regarde vers Z+ (face au vent) avec inclinaison pour angle d'attaque
             const rotationX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -15 * Math.PI / 180);
-            state.orientation.multiplyQuaternions(rotationY, rotationX);
+            state.orientation.copy(rotationX);
             
             const simState: SimulationState = {
                 kite: state,
                 wind: {
-                    velocity: new THREE.Vector3(0, 0, this.config.wind.speed),
-                    direction: new THREE.Vector3(0, 0, 1),
+                    velocity: new THREE.Vector3(0, 0, -this.config.wind.speed), // Vent vers Z-
+                    direction: new THREE.Vector3(0, 0, -1), // Direction vers Z-
                     speed: this.config.wind.speed,
                     turbulence: 0,
                 },
@@ -378,6 +380,7 @@ export class NewSimulation {
             this.kiteVisualizer.update();
             this.linesVisualizer.update(winchPositions.left, winchPositions.right, this.kite);
             this.geometryLabelsVisualizer.update(this.kite, this.controlStationVisualizer);
+            this.panelNumbersVisualizer.update(this.kite);
             
             // Publier événement
             this.eventBus.publish({
@@ -419,6 +422,9 @@ export class NewSimulation {
         
         // Mise à jour des labels de géométrie
         this.geometryLabelsVisualizer.update(this.kite, this.controlStationVisualizer);
+        
+        // Mise à jour des numéros de panneaux
+        this.panelNumbersVisualizer.update(this.kite);
         
         // Trajectoire
         if (simState.elapsedTime % 0.1 < deltaTime) {
@@ -620,15 +626,13 @@ export class NewSimulation {
      */
     private reset(): void {
         const initialState = createInitialState();
-        // Position initiale : Z=+8 (kite emporté par le vent vers Z+)
+        // 🔧 CORRECTION: Position initiale Z=+8 (kite face au vent venant de Z+)
         // Avec treuils à (±0.5, 0, 0) et position (0, 8, 8) → distance ≈ 11.4m (lignes légèrement tendues)
         initialState.position.set(0, 8, 8);
         
-        // Orientation initiale : rotation 180° sur Y pour que le kite regarde vers Z- (vers la station)
-        // puis inclinaison -15° sur X pour angle d'attaque optimal
-        const rotationY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+        // 🔧 CORRECTION: Le kite regarde vers Z+ (face au vent) avec inclinaison pour angle d'attaque
         const rotationX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -15 * Math.PI / 180);
-        initialState.orientation.multiplyQuaternions(rotationY, rotationX);
+        initialState.orientation.copy(rotationX);
         
         this.physicsEngine.reset(initialState);
         this.trajectoryVisualizer.clear();
@@ -697,6 +701,7 @@ export class NewSimulation {
         this.debugVisualizer.dispose();
         this.controlStationVisualizer.dispose();
         this.geometryLabelsVisualizer.dispose();
+        this.panelNumbersVisualizer.dispose();
         this.scene.dispose();
         this.renderer.dispose();
         this.camera.dispose();
@@ -825,11 +830,15 @@ export class NewSimulation {
     /**
      * Active/désactive le mode debug géométrie.
      * En mode debug, le cerf-volant est figé à la position (0, 2, 2).
+     * Les mouvements de caméra restent possibles - le mode de caméra de l'utilisateur est préservé.
      */
     public toggleGeometryDebug(): void {
         this.geometryDebugMode = !this.geometryDebugMode;
         
         if (this.geometryDebugMode) {
+            // Sauvegarder le mode de caméra actuel avant d'activer le mode géométrie
+            this.lastCameraMode = this.camera.getMode();
+            
             // Positionner le kite à (0, 3, 5) pour debug géométrie (position visible avec bonne perspective)
             this.geometryDebugPosition.set(0, 3, 5);
             
@@ -839,21 +848,16 @@ export class NewSimulation {
             state.velocity.set(0, 0, 0);
             state.angularVelocity.set(0, 0, 0);
             
-            // Orientation : rotation 180° sur Y pour que le kite regarde vers Z- (vers la station)
-            // puis inclinaison -15° sur X pour angle d'attaque optimal
-            const rotationY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+            // 🔧 CORRECTION: Le kite regarde vers Z+ (face au vent) avec inclinaison pour angle d'attaque
             const rotationX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -15 * Math.PI / 180);
-            state.orientation.multiplyQuaternions(rotationY, rotationX);
+            state.orientation.copy(rotationX);
             
-            // Zoomer la caméra sur le cerf-volant en mode FOLLOW
-            this.camera.setMode(CameraMode.FOLLOW);
-            
-            this.logger.control('🔍 Mode debug géométrie ACTIVÉ - Kite à (0, 3, 5)');
+            this.logger.control('🔍 Mode debug géométrie ACTIVÉ - Kite à (0, 3, 5) - Mouvements de caméra préservés');
         } else {
-            // Revenir en mode orbite
-            this.camera.setMode(CameraMode.ORBIT);
+            // Restaurer le mode de caméra précédent au lieu de forcer ORBIT
+            this.camera.setMode(this.lastCameraMode);
             
-            this.logger.control('🔍 Mode debug géométrie DÉSACTIVÉ');
+            this.logger.control('🔍 Mode debug géométrie DÉSACTIVÉ - Mode caméra restauré');
         }
     }
     
@@ -870,16 +874,27 @@ export class NewSimulation {
     }
     
     /**
+     * Active/désactive l'affichage des numéros de panneaux.
+     */
+    public togglePanelNumbers(): void {
+        const currentVisibility = this.panelNumbersVisualizer.getObject().visible;
+        this.panelNumbersVisualizer.setVisible(!currentVisibility);
+        
+        this.logger.control(
+            `🔢 Numéros de panneaux: ${!currentVisibility ? 'ACTIVÉS ✅' : 'DÉSACTIVÉS ❌'}`
+        );
+    }
+    
+    /**
      * Change la vitesse du vent dynamiquement.
      */
     public setWindSpeed(speed: number): void {
         this.config.wind.speed = speed;
         
-        // Mettre à jour le windState dans le PhysicsEngine
-        // Le vent va de Z- vers Z+ (pousse le kite vers Z+)
+        // 🔧 CORRECTION: Le vent va de Z+ vers Z- (souffle vers le pilote)
         this.physicsEngine.setWindState({
-            velocity: new THREE.Vector3(0, 0, speed),
-            direction: new THREE.Vector3(0, 0, 1),
+            velocity: new THREE.Vector3(0, 0, -speed), // Vent vers Z-
+            direction: new THREE.Vector3(0, 0, -1), // Direction vers Z-
             speed: speed,
             turbulence: this.config.wind.turbulence,
         });
