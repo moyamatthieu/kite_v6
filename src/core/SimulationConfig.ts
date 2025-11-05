@@ -150,7 +150,7 @@ export const DEFAULT_CONFIG: SimulationConfig = {
         // Ratio L/W ≈ 21 à 10 m/s = NORMAL car lignes retiennent le cerf-volant
     },
     wind: {
-        speed: 10.0,  // m/s (36 km/h) - Vent optimal pour cerf-volant acrobatique
+        speed: 12.0,  // m/s (36 km/h) - Vent optimal pour cerf-volant acrobatique
         // Vent léger 3-5 m/s : difficile | Optimal 8-12 m/s : réactif | Fort 15+ m/s : survol
         direction: { x: 0, y: 0, z: -1 }, // 🔧 CORRECTION: Vent va de Z+ vers Z- (souffle vers le pilote)
         turbulence: 0,  // Pas de turbulence pour l'instant

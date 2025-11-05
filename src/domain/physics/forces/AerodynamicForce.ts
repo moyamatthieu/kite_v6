@@ -83,12 +83,18 @@ export interface AerodynamicForceConfig {
 
 /**
  * Calculateur de forces aérodynamiques (portance + traînée).
+ * ✅ OPTIMISÉ: Vecteurs temporaires réutilisables pour réduire allocations
  */
 export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
     public readonly name = 'AerodynamicForce';
     
     private config: AerodynamicForceConfig;
     private kite: Kite;
+    
+    // ✅ OPTIMISATION: Vecteurs temporaires réutilisables (réduire allocations)
+    private tempVector1 = new THREE.Vector3();
+    private tempVector2 = new THREE.Vector3();
+    private tempVector3 = new THREE.Vector3();
     
     constructor(kite: Kite, config?: Partial<AerodynamicForceConfig>) {
         this.kite = kite;
@@ -109,14 +115,15 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
     
     /**
      * Calcule les forces aérodynamiques avec détails par panneau.
+     * ✅ OPTIMISÉ: Réutilise vecteurs temporaires au lieu de créer/cloner
      */
     calculateDetailed(state: KitePhysicsState, wind: WindState, deltaTime: number): AerodynamicForceResult {
         const totalLift = new THREE.Vector3(0, 0, 0);
         const totalDrag = new THREE.Vector3(0, 0, 0);
         
-        // Calculer le vent apparent
-        const apparentWind = wind.velocity.clone().sub(state.velocity);
-        const windSpeed = apparentWind.length();
+        // Calculer le vent apparent (réutilise tempVector1)
+        this.tempVector1.copy(wind.velocity).sub(state.velocity);
+        const windSpeed = this.tempVector1.length();
         
         if (windSpeed < 0.1) {
             // Pas de vent apparent significatif
@@ -125,13 +132,14 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
                 drag: totalDrag,
                 total: new THREE.Vector3(0, 0, 0),
                 angleOfAttack: 0,
-                apparentWind,
+                apparentWind: this.tempVector1.clone(), // Clone pour retour
                 liftCoefficient: 0,
                 dragCoefficient: 0,
             };
         }
         
-        const windDirection = apparentWind.clone().normalize();
+        // Direction du vent (réutilise tempVector2)
+        this.tempVector2.copy(this.tempVector1).normalize();
         
         // Sommer les forces sur tous les panneaux
         const panelCount = this.kite.getPanelCount();
@@ -140,8 +148,8 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
             const panelForce = this.calculatePanelForce(
                 i,
                 state,
-                apparentWind,
-                windDirection,
+                this.tempVector1, // apparentWind
+                this.tempVector2, // windDirection
                 windSpeed
             );
             
@@ -154,14 +162,14 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         // Angle d'attaque moyen (simplifié: panneau central)
         const centralPanelIndex = Math.floor(panelCount / 2);
         const centralNormal = this.kite.getGlobalPanelNormal(centralPanelIndex);
-        const angleOfAttack = Math.asin(Math.abs(centralNormal.dot(windDirection)));
+        const angleOfAttack = Math.asin(Math.abs(centralNormal.dot(this.tempVector2)));
         
         return {
             lift: totalLift,
             drag: totalDrag,
             total,
             angleOfAttack,
-            apparentWind,
+            apparentWind: this.tempVector1.clone(), // Clone pour retour
             liftCoefficient: this.getLiftCoefficient(angleOfAttack),
             dragCoefficient: this.getDragCoefficient(angleOfAttack),
         };
@@ -169,6 +177,7 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
     
     /**
      * Calcule la force sur un panneau spécifique.
+     * ✅ OPTIMISÉ: Réutilise tempVector3 pour réduire allocations
      * 
      * La portance dépend de l'angle d'attaque et de l'orientation relative au vent.
      * Pour un profil aérodynamique correctement orienté :
@@ -185,39 +194,24 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         const panelNormal = this.kite.getGlobalPanelNormal(panelIndex);
         const panelArea = this.kite.getPanelArea(panelIndex);
 
-        // 🔧 CORRECTION: Composante du vent sur la normale du panneau
-        // windDirection = direction où VA le vent (de Z+ vers Z-)
-        // Le kite regarde vers Z+ (face au vent), donc son intrados (face avant) fait face à Z+
-        // Le vent arrive de Z+ et va vers Z-, donc windDirection pointe vers Z-
-        // Quand le vent frappe l'intrados : normalWindComponent > 0 (normale et vent colinéaires)
-        // Quand le vent frappe l'extrados : normalWindComponent < 0 (normale et vent opposés)
         const normalWindComponent = panelNormal.dot(windDirection);
-
-        // Angle d'attaque basé sur la valeur absolue (pour les courbes Cl/Cd standards)
         const alpha = Math.asin(Math.min(1, Math.abs(normalWindComponent)));
         
         const Cl = this.getLiftCoefficient(alpha);
         const Cd = this.getDragCoefficient(alpha);
         
-        // Pression dynamique : q = 0.5 * ρ * v²
         const dynamicPressure = 0.5 * this.config.airDensity * windSpeed * windSpeed;
-        
-        // Forces aérodynamiques : F = q * S * C
         const liftMagnitude = dynamicPressure * panelArea * Cl;
         const dragMagnitude = dynamicPressure * panelArea * Cd;
 
-        // 🔧 TRAÎNÉE : Opposée au vent apparent (dans la direction -windDirection)
+        // Traînée : Opposée au vent apparent
         const drag = windDirection.clone().multiplyScalar(-dragMagnitude);
 
-        // 🔧 PORTANCE : Perpendiculaire au vent apparent
-        // Calculer la portance dans le plan (normale, vent)
-        // Direction de portance = normale - (normale·vent)*vent (projection orthogonale)
+        // Portance : Perpendiculaire au vent apparent (réutilise tempVector3)
         const normalDotWind = panelNormal.dot(windDirection);
-        const liftDirection = panelNormal.clone()
-            .sub(windDirection.clone().multiplyScalar(normalDotWind))
-            .normalize();
+        this.tempVector3.copy(windDirection).multiplyScalar(normalDotWind);
+        const liftDirection = panelNormal.clone().sub(this.tempVector3).normalize();
         
-        // Si le vent est parallèle à la normale, pas de portance latérale
         if (liftDirection.length() < 0.01) {
             return { 
                 lift: new THREE.Vector3(0, 0, 0), 
@@ -225,8 +219,7 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
             };
         }
         
-        // Signe de la portance : positif si le vent frappe l'intrados
-        const liftSign = Math.sign(normalDotWind) || 1; // Éviter 0
+        const liftSign = Math.sign(normalDotWind) || 1;
         const lift = liftDirection.multiplyScalar(liftMagnitude * liftSign);
         
         return { lift, drag };

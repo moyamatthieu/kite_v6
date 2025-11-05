@@ -133,6 +133,12 @@ export class NewSimulation {
             maxAngularVelocity: this.config.physics.maxAngularVelocity,
         });
         
+        // ✅ OPTIMISATION: Configurer géométrie pour calcul d'inertie dynamique
+        integrator.setKiteGeometry(
+            this.kite.geometry.parameters.wingspan,
+            this.kite.geometry.parameters.height
+        );
+        
         const forceManager = new ForceManager();
         
         // Ajouter calculateurs de forces

@@ -15,6 +15,7 @@ export class VerletIntegrator implements IIntegrator {
     public readonly name = 'VerletIntegrator';
     
     private config: Required<VerletIntegratorConfig>;
+    private kiteGeometry: { wingspan: number; height: number } | null = null;
     
     constructor(config?: VerletIntegratorConfig) {
         this.config = {
@@ -22,6 +23,13 @@ export class VerletIntegrator implements IIntegrator {
             maxVelocity: config?.maxVelocity ?? 30,
             maxAngularVelocity: config?.maxAngularVelocity ?? 8,
         };
+    }
+    
+    /**
+     * Configure la géométrie du cerf-volant pour calcul d'inertie dynamique.
+     */
+    setKiteGeometry(wingspan: number, height: number): void {
+        this.kiteGeometry = { wingspan, height };
     }
     
     /**
@@ -60,13 +68,11 @@ export class VerletIntegrator implements IIntegrator {
         
         // 4. Rotation (similaire mais pour quaternions)
         // Accélération angulaire : α = τ / I
-        // Inertie pour kite rectangulaire : I ≈ (1/12) × m × (L² + h²)
-        // Pour wingspan=1.65m, height=0.65m, mass=0.4kg
-        // I = (1/12) × 0.4 × (1.65² + 0.65²) ≈ 0.108 kg·m²
-        // 🔧 Valeur réaliste basée sur géométrie
-        const L = 1.65; // wingspan
-        const h = 0.65; // height
-        const inertia = (1/12) * mass * (L*L + h*h); // ≈ 0.108 kg·m²
+        // Inertie pour kite rectangulaire : I = (1/12) × m × (L² + h²)
+        // ✅ OPTIMISATION: Calcul dynamique basé sur géométrie réelle
+        const wingspan = this.kiteGeometry?.wingspan ?? 1.65;
+        const height = this.kiteGeometry?.height ?? 0.65;
+        const inertia = (1/12) * mass * (wingspan * wingspan + height * height);
         const angularAcceleration = torque.clone().divideScalar(inertia);
         
         // Intégration vitesse angulaire

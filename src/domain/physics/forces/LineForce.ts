@@ -45,6 +45,7 @@ export interface WinchPositions {
 
 /**
  * Calculateur de forces des lignes (modèle bi-régime ressort-amortisseur).
+ * ✅ OPTIMISÉ: Vecteurs temporaires réutilisables pour réduire allocations
  */
 export class LineForceCalculator implements ILineForceCalculator {
     public readonly name = 'LineForce';
@@ -54,9 +55,13 @@ export class LineForceCalculator implements ILineForceCalculator {
     private winchPositions: WinchPositions;
     
     // Tensions lissées pour éviter oscillations
-    // ✅ CORRECTION: Initialisation avec minTension pour éviter choc initial
     private smoothedLeftTension: number;
     private smoothedRightTension: number;
+    
+    // ✅ OPTIMISATION: Vecteurs temporaires réutilisables (réduire allocations)
+    private tempVector1 = new THREE.Vector3();
+    private tempVector2 = new THREE.Vector3();
+    private tempVector3 = new THREE.Vector3();
     
     constructor(
         kite: Kite,
@@ -66,17 +71,15 @@ export class LineForceCalculator implements ILineForceCalculator {
         this.kite = kite;
         this.winchPositions = winchPositions;
         this.config = {
-            stiffness: config?.stiffness ?? 20,  // Augmenté de 10 → 20 pour zone linéaire
+            stiffness: config?.stiffness ?? 20,
             damping: config?.damping ?? 10,
             smoothingCoefficient: config?.smoothingCoefficient ?? 0.2,
             minTension: config?.minTension ?? 1.5,
-            // 🔧 NOUVEAUX paramètres pour protection exponentielle
-            exponentialThreshold: config?.exponentialThreshold ?? 1.0,  // Activation à 1m d'extension
-            exponentialStiffness: config?.exponentialStiffness ?? 50,   // Force exponentielle
-            exponentialRate: config?.exponentialRate ?? 1.5,            // Croissance rapide
+            exponentialThreshold: config?.exponentialThreshold ?? 1.0,
+            exponentialStiffness: config?.exponentialStiffness ?? 50,
+            exponentialRate: config?.exponentialRate ?? 1.5,
         };
         
-        // ✅ CORRECTION: Initialiser les tensions lissées avec minTension
         this.smoothedLeftTension = this.config.minTension;
         this.smoothedRightTension = this.config.minTension;
     }
@@ -145,6 +148,7 @@ export class LineForceCalculator implements ILineForceCalculator {
     
     /**
      * Calcule la force d'une seule ligne (modèle bi-régime).
+     * ✅ OPTIMISÉ: Réutilise vecteurs temporaires au lieu de créer/cloner
      */
     private calculateSingleLineForce(
         winchPos: Vector3D,
@@ -153,9 +157,9 @@ export class LineForceCalculator implements ILineForceCalculator {
         state: KitePhysicsState,
         isLeft: boolean
     ): { force: Vector3D; tension: number; distance: number } {
-        // Vecteur ligne et distance
-        const lineVector = new THREE.Vector3().subVectors(attachPos, winchPos);
-        const currentDistance = lineVector.length();
+        // Vecteur ligne et distance (réutilise tempVector1)
+        this.tempVector1.subVectors(attachPos, winchPos);
+        const currentDistance = this.tempVector1.length();
         
         if (currentDistance < 0.01) {
             return {
@@ -165,12 +169,16 @@ export class LineForceCalculator implements ILineForceCalculator {
             };
         }
         
-        const lineDirection = lineVector.clone().normalize();
-        const restLength = targetLength; // Longueur de repos = longueur cible (basée sur la géométrie réelle)
-        const attachmentOffset = new THREE.Vector3().subVectors(attachPos, state.position);
+        // Direction de la ligne (réutilise tempVector2)
+        this.tempVector2.copy(this.tempVector1).normalize();
+        
+        const restLength = targetLength;
+        
+        // Vitesse au point d'attache (réutilise tempVector3)
+        this.tempVector3.subVectors(attachPos, state.position);
         const rotationalVelocity = new THREE.Vector3()
             .copy(state.angularVelocity)
-            .cross(attachmentOffset);
+            .cross(this.tempVector3);
         const attachVelocity = state.velocity.clone().add(rotationalVelocity);
         
         let tension = 0;
@@ -182,32 +190,30 @@ export class LineForceCalculator implements ILineForceCalculator {
             // Régime 2 : Ligne tendue - Modèle HYBRIDE Linéaire-Exponentiel
             const extension = currentDistance - restLength;
             
-            // Vitesse radiale (projection de la vitesse sur la direction de la ligne)
-            const radialVelocity = attachVelocity.dot(lineDirection);
+            // Vitesse radiale
+            const radialVelocity = attachVelocity.dot(this.tempVector2);
             
             // Calcul de la force de rappel selon l'extension
             let springForce: number;
             
             if (extension < this.config.exponentialThreshold) {
-                // 🔵 ZONE LINÉAIRE (proche du repos) : F = k × Δl
+                // Zone linéaire
                 springForce = this.config.stiffness * extension;
             } else {
-                // 🔴 ZONE EXPONENTIELLE (loin du repos) : F = k_exp × (e^(α×(Δl-seuil)) - 1) + F_seuil
+                // Zone exponentielle
                 const thresholdForce = this.config.stiffness * this.config.exponentialThreshold;
                 const excessExtension = extension - this.config.exponentialThreshold;
                 const expTerm = Math.exp(this.config.exponentialRate * excessExtension) - 1;
                 springForce = this.config.exponentialStiffness * expTerm + thresholdForce;
             }
             
-            // Amortissement (inchangé)
             const dampingForce = this.config.damping * radialVelocity;
             
             tension = springForce + dampingForce;
-            tension = Math.max(0, tension); // Pas de compression
+            tension = Math.max(0, tension);
         }
         
-        // Lissage temporel pour éviter oscillations
-        // ✅ CORRECTION: Lissage exponentiel sans test de première valeur
+        // Lissage temporel
         const alpha = this.config.smoothingCoefficient;
         if (isLeft) {
             this.smoothedLeftTension = alpha * tension + (1 - alpha) * this.smoothedLeftTension;
@@ -217,8 +223,8 @@ export class LineForceCalculator implements ILineForceCalculator {
             tension = this.smoothedRightTension;
         }
         
-        // Force = tension × direction (vers le treuil)
-        const force = lineDirection.clone().multiplyScalar(-tension);
+        // Force = tension × direction (vers le treuil) - réutilise tempVector2 qui contient lineDirection
+        const force = this.tempVector2.clone().multiplyScalar(-tension);
         
         return { force, tension, distance: currentDistance };
     }
