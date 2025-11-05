@@ -207,18 +207,38 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         // Traînée : Opposée au vent apparent
         const drag = windDirection.clone().multiplyScalar(-dragMagnitude);
 
-        // Portance : Perpendiculaire au vent apparent (réutilise tempVector3)
-        const normalDotWind = panelNormal.dot(windDirection);
-        this.tempVector3.copy(windDirection).multiplyScalar(normalDotWind);
-        const liftDirection = panelNormal.clone().sub(this.tempVector3).normalize();
+        // ═══════════════════════════════════════════════════════════════════════════
+        // PORTANCE : Direction correcte par DOUBLE PRODUIT VECTORIEL
+        // ═══════════════════════════════════════════════════════════════════════════
+        // La portance doit être perpendiculaire au vent apparent ET pointer vers 
+        // l'extérieur du cerf-volant (intrados).
+        // 
+        // Méthode du double produit vectoriel (correcte pour cerf-volant) :
+        // 1. axe = panelNormal × windDirection (perpendiculaire au plan normal-vent)
+        // 2. liftDirection = axe × windDirection (perpendiculaire au vent, dans le plan)
+        // 
+        // Cette méthode garantit que la portance :
+        // - Est toujours perpendiculaire au vent apparent
+        // - Pointe vers l'extérieur de l'aile (intrados)
+        // - S'adapte correctement lors des virages
+        // ═══════════════════════════════════════════════════════════════════════════
         
-        if (liftDirection.length() < 0.01) {
+        // Étape 1 : Calculer l'axe perpendiculaire (réutilise tempVector3)
+        this.tempVector3.crossVectors(panelNormal, windDirection);
+        
+        if (this.tempVector3.length() < 0.01) {
+            // Normal parallèle au vent → pas de portance (angle d'attaque = 0° ou 180°)
             return { 
                 lift: new THREE.Vector3(0, 0, 0), 
                 drag 
             };
         }
         
+        // Étape 2 : Double produit vectoriel pour obtenir direction portance
+        const liftDirection = new THREE.Vector3().crossVectors(this.tempVector3, windDirection).normalize();
+        
+        // Étape 3 : Appliquer le signe (intrados vs extrados)
+        const normalDotWind = panelNormal.dot(windDirection);
         const liftSign = Math.sign(normalDotWind) || 1;
         const lift = liftDirection.multiplyScalar(liftMagnitude * liftSign);
         
