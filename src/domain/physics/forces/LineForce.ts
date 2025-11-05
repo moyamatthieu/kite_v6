@@ -183,11 +183,15 @@ export class LineForceCalculator implements ILineForceCalculator {
         
         let tension = 0;
         
-        if (currentDistance < restLength) {
-            // Régime 1 : Tension minimale (ligne détendue)
-            tension = this.config.minTension;
+        // ✅ CORRECTION PHYSIQUE CRITIQUE: Le fil ne peut que TIRER, jamais POUSSER
+        // Un fil mou (slack) a une tension = 0 Newton (pas de minTension artificielle)
+        // Ceci permet la chute libre quand le vent cesse
+        if (currentDistance <= restLength) {
+            // Régime SLACK : Ligne détendue ou à longueur de repos → Tension nulle
+            // Le cerf-volant peut tomber librement sous l'effet de la gravité
+            tension = 0;
         } else {
-            // Régime 2 : Ligne tendue - Modèle HYBRIDE Linéaire-Exponentiel
+            // Régime TENDU : Ligne étirée - Modèle HYBRIDE Linéaire-Exponentiel
             const extension = currentDistance - restLength;
             
             // Vitesse radiale
@@ -233,9 +237,9 @@ export class LineForceCalculator implements ILineForceCalculator {
      * Réinitialise les tensions lissées (appelé lors d'un reset).
      */
     reset(): void {
-        // ✅ CORRECTION: Réinitialiser avec minTension au lieu de 0
-        this.smoothedLeftTension = this.config.minTension;
-        this.smoothedRightTension = this.config.minTension;
+        // ✅ CORRECTION: Réinitialiser à 0 (pas de tension artificielle au démarrage)
+        this.smoothedLeftTension = 0;
+        this.smoothedRightTension = 0;
     }
     
     /**

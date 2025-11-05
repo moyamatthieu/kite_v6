@@ -228,40 +228,59 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
     /**
      * Coefficient de portance en fonction de l'angle d'attaque.
      * 
-     * Modèle pour cerf-volant : portance maximale à ~15-20°, puis décrochage progressif.
-     * Courbe Cl(α) linéaire jusqu'à 15°, puis décrochage progressif.
+     * 🪁 MODÈLE SPÉCIFIQUE CERF-VOLANT (pas un avion !)
+     * 
+     * Principes physiques d'un cerf-volant :
+     * - α ≈ 0° : Parallèle au vent → Portance minimale, forte traînée (décrochage)
+     * - α ≈ 10-20° : Angle optimal → Portance maximale (vol stable)
+     * - α > 45° : Surface max au vent → Effet parachute (freinage violent)
+     * 
+     * Ce modèle force le cerf-volant à trouver son équilibre optimal naturellement
+     * (comportement émergent, pas scripté).
+     * 
+     * @param alpha - Angle d'attaque en radians
+     * @returns Coefficient de portance Cl (sans unité)
      */
     private getLiftCoefficient(alpha: number): number {
         const alphaDeg = (alpha * 180) / Math.PI;
         
-        if (alphaDeg <= 15) {
-            // Zone linéaire (0-15°) : Cl croît linéairement avec l'angle
-            return this.config.referenceLiftCoefficient * (alphaDeg / 15);
+        // 1. Décrochage ou freinage (angle trop faible ou trop élevé)
+        if (alphaDeg < 5 || alphaDeg > 45) {
+            return 0.1; // Très faible portance (cerf-volant instable/chute)
         }
         
-        if (alphaDeg <= 25) {
-            // Zone de portance maximale (15-25°)
-            return this.config.referenceLiftCoefficient;
-        }
+        // 2. Vol optimal (15-20°)
+        // Fonction parabolique centrée sur 15° qui maximise Cl
+        const normalizedAlpha = (alphaDeg - 15) / 15; // Centré sur 15°
+        const Cl = this.config.referenceLiftCoefficient * (1 - normalizedAlpha * normalizedAlpha);
         
-        if (alphaDeg <= 45) {
-            // Décrochage progressif (25-45°)
-            const t = (alphaDeg - 25) / 20;
-            return this.config.referenceLiftCoefficient * (1 - 0.5 * t);
-        }
-        
-        // Décrochage complet (>45°)
-        return this.config.referenceLiftCoefficient * 0.5;
+        return Math.max(0.1, Cl); // Minimum 0.1 pour stabilité numérique
     }
     
     /**
      * Coefficient de traînée en fonction de l'angle d'attaque.
+     * 
+     * 🪁 MODÈLE SPÉCIFIQUE CERF-VOLANT
+     * 
+     * La traînée augmente fortement aux angles extrêmes (effet parachute).
+     * Cd = Cd_min (traînée de forme) + Cd_induit (dépend de Cl²)
+     * 
+     * @param alpha - Angle d'attaque en radians
+     * @returns Coefficient de traînée Cd (sans unité)
      */
     private getDragCoefficient(alpha: number): number {
         const alphaDeg = (alpha * 180) / Math.PI;
         
-        // Cd = Cd_ref + k * alpha²
-        const k = 0.02;
-        return this.config.referenceDragCoefficient + k * alphaDeg * alphaDeg;
+        // 1. Effet parachute (angle > 45° ou < 5°)
+        if (alphaDeg < 5 || alphaDeg > 45) {
+            return 1.2; // Traînée très forte (freinage brutal)
+        }
+        
+        // 2. Vol normal : Cd = Cd_forme + Cd_induit
+        const Cl = this.getLiftCoefficient(alpha);
+        const Cd_forme = 0.3; // Traînée minimale (forme du cerf-volant)
+        const Cd_induit = 0.5 * Cl * Cl; // Traînée induite par la portance
+        
+        return Cd_forme + Cd_induit;
     }
 }

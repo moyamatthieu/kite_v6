@@ -87,13 +87,6 @@ export class ZenithMode implements IAutoPilotMode {
         const command = commandX * 0.7 + commandY * 0.3;
         const clampedCommand = Math.max(-0.5, Math.min(0.5, command));
 
-        // Log détaillé pour debug (toutes les 2 secondes)
-        if (Math.floor(state.timestamp) % 2 === 0 && Math.floor(state.timestamp * 10) % 10 === 0) {
-            console.log(`🎯 ZENITH | Pos:(${state.position.x.toFixed(1)},${state.position.y.toFixed(1)}) ` +
-                       `Err:(${errorX.toFixed(2)},${errorY.toFixed(2)}) ` +
-                       `Cmd:(${commandX.toFixed(3)},${commandY.toFixed(3)})→${clampedCommand.toFixed(3)}`);
-        }
-
         return clampedCommand;
     }
     

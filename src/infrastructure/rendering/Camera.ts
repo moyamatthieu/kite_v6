@@ -278,8 +278,6 @@ export class Camera {
         this.mouseButtons.middle = (event.button === 1);
         this.mouseButtons.right = (event.button === 2);
         
-        console.log(`🖱️ MouseDown - Button: ${event.button}, Mode: ${this.mode}, Position: (${event.clientX}, ${event.clientY})`);
-        
         // Changer le curseur pendant le drag
         if (this.canvas) {
             this.canvas.style.cursor = 'grabbing';
@@ -294,11 +292,6 @@ export class Camera {
         
         const deltaX = event.clientX - this.lastMousePosition.x;
         const deltaY = event.clientY - this.lastMousePosition.y;
-        
-        // Log seulement si mouvement significatif
-        if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) {
-            console.log(`🖱️ MouseMove - Delta: (${deltaX.toFixed(0)}, ${deltaY.toFixed(0)}), Mode: ${this.mode}, Buttons: L${this.mouseButtons.left} M${this.mouseButtons.middle} R${this.mouseButtons.right}`);
-        }
         
         this.lastMousePosition = { x: event.clientX, y: event.clientY };
         
