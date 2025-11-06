@@ -52,6 +52,9 @@ export interface SimulationConfig {
     
     /** Configuration des logs */
     logging: LoggingConfig;
+    
+    /** Configuration comportement simulation */
+    behavior: SimulationBehaviorConfig;
 }
 
 export interface PhysicsConfig {
@@ -61,6 +64,7 @@ export interface PhysicsConfig {
     maxVelocity: number; // m/s
     maxAngularVelocity: number; // rad/s
     fixedTimeStep?: number; // s - Pas de temps fixe pour la physique (stabilité)
+    maxSubsteps: number; // Limite de sous-pas pour éviter spiral of death
 }
 
 export interface KiteConfig {
@@ -85,6 +89,38 @@ export interface LinesConfig {
     exponentialThreshold: number; // m
     exponentialStiffness: number; // N
     exponentialRate: number; // 1/m
+    
+    /** 🎯 NOUVEAUTÉ : Configuration système de brides (chaîne de transmission) */
+    bridles: BridlesConfig;
+}
+
+/**
+ * Configuration du système de brides (Ligne → Point de contrôle → Brides → Structure).
+ * 
+ * 🎯 NOUVEAU MODÈLE : Résolution de contraintes géométriques
+ * 
+ * Le point de contrôle n'est PAS solidaire de la structure du kite.
+ * Il est déterminé par résolution d'un système de 4 contraintes :
+ * 1. Distance au treuil = longueur ligne
+ * 2. Distance au NEZ = longueur bride 1
+ * 3. Distance au TRAVERSE = longueur bride 2
+ * 4. Distance au CENTRE = longueur bride 3
+ * 
+ * Les forces sont ensuite distribuées sur les 3 brides par résolution
+ * d'un système linéaire 3×3 assurant l'équilibre statique.
+ */
+export interface BridlesConfig {
+    /** Nombre maximum d'itérations Newton-Raphson pour convergence */
+    maxIterations: number;
+    
+    /** Tolérance de convergence (m) - Distance résiduelle acceptable */
+    convergenceTolerance: number;
+    
+    /** Facteur de relaxation pour stabilité numérique (0-1) */
+    relaxationFactor: number;
+    
+    /** Poids relatif de la contrainte ligne vs brides (>1 = priorité ligne) */
+    lineConstraintWeight: number;
 }
 
 export interface ControlConfig {
@@ -115,6 +151,21 @@ export interface LoggingConfig {
     consoleOutput: boolean;
 }
 
+export interface SimulationBehaviorConfig {
+    /** Configuration auto-reset au sol */
+    autoReset: {
+        enabled: boolean; // Activer l'auto-reset
+        groundThreshold: number; // m - Altitude considérée comme "au sol"
+        velocityThreshold: number; // m/s - Vitesse considérée comme stable
+        stabilityDuration: number; // s - Durée au sol avant reset
+    };
+    /** Positions de debug */
+    debugPositions: {
+        geometry: { x: number; y: number; z: number }; // Position debug géométrie
+        lift: { x: number; y: number; z: number }; // Position debug portance
+    };
+}
+
 /**
  * Configuration par défaut.
  */
@@ -140,6 +191,10 @@ export const DEFAULT_CONFIG: SimulationConfig = {
         // Avec k=2000 N/m, nécessite dt < 5ms pour stabilité numérique du ressort
         // 4 calculs physiques par frame rendue à 60 FPS, pas de surcharge significative
         fixedTimeStep: 1/240,  // 240 Hz - Stabilité optimale pour lignes rigides (k=2000 N/m)
+        
+        // Limite de sous-pas physique par frame de rendu pour éviter "spiral of death"
+        // Si FPS tombe trop bas, on plafonne les itérations physiques pour rester réactif
+        maxSubsteps: 5,  // 5 sous-pas max = simulation jusqu'à 12 FPS minimum
     },
     kite: {
         // ✅ VALEURS RÉELLES d'un cerf-volant acrobatique standard (type Revolution)
@@ -155,12 +210,14 @@ export const DEFAULT_CONFIG: SimulationConfig = {
                 center: 0.65,  // m - Longueur bride centre
             }
         },
-        // ✅ COEFFICIENTS AÉRODYNAMIQUES RÉELS (toile plate + structure tubulaire)
-        // Sources : études aérodynamiques sur cerfs-volants, pas estimations arbitraires
-        // Surface ≈ 1.07 m², vent 10 m/s → Portance ≈ 52N, Traînée ≈ 33N
-        liftCoefficient: 0.8,   // Cl réel pour toile plate (vs 1.5-2.0 pour aile profilée)
-        dragCoefficient: 0.5,   // Cd réel pour structure tubulaire (élevé vs aile profilée)
-        // Ratio L/W ≈ 21 à 10 m/s = NORMAL car lignes retiennent le cerf-volant
+        // ✅ COEFFICIENTS AÉRODYNAMIQUES CERF-VOLANT (toile plate + structure)
+        // 🔧 AUGMENTÉS pour créer l'effet "pendule" correct
+        // Un cerf-volant doit générer BEAUCOUP de traînée pour se positionner sous le vent
+        // Surface ≈ 1.07 m², vent 10 m/s → Forces ~60-80N nécessaires pour équilibre
+        liftCoefficient: 1.0,   // Cl pour toile plate tendue (augmenté de 0.8)
+        dragCoefficient: 1.0,   // Cd élevé pour cerf-volant (augmenté de 0.8)
+        // La traînée forte crée l'effet "pendule" qui tire le kite en arrière (vers Z+)
+        // et le maintient en tension sur les lignes dans la fenêtre de vol
     },
     wind: {
         speed: 12.0,  // m/s (36 km/h) - Vent optimal pour cerf-volant acrobatique
@@ -208,6 +265,15 @@ export const DEFAULT_CONFIG: SimulationConfig = {
         exponentialThreshold: 0.3,  // m - Protection dès 3% d'allongement (au lieu de 5%)
         exponentialStiffness: 500,  // N - Force protection FORTE (×2.5 vs tentative précédente)
         exponentialRate: 2.0,  // 1/m - Croissance exponentielle rapide
+        
+        // 🎯 NOUVEAUTÉ : Système de brides avec résolution de contraintes
+        bridles: {
+            // Paramètres solveur Newton-Raphson
+            maxIterations: 20,  // Itérations max pour convergence
+            convergenceTolerance: 0.001,  // m - Tolérance 1mm (précision suffisante)
+            relaxationFactor: 0.7,  // Facteur de relaxation pour stabilité
+            lineConstraintWeight: 2.0,  // Priorité 2× sur contrainte ligne vs brides
+        },
     },
     control: {
         deltaMax: 0.6,
@@ -232,5 +298,17 @@ export const DEFAULT_CONFIG: SimulationConfig = {
         enabled: true,
         bufferSize: 32,
         consoleOutput: true,
+    },
+    behavior: {
+        autoReset: {
+            enabled: true,  // Auto-reset activé par défaut
+            groundThreshold: 1.0,  // m - Altitude considérée comme "au sol"
+            velocityThreshold: 0.2,  // m/s - Vitesse considérée comme stable
+            stabilityDuration: 2.0,  // s - 2 secondes au sol stable avant reset
+        },
+        debugPositions: {
+            geometry: { x: 0, y: 3, z: 5 },  // Position centrée, bonne perspective
+            lift: { x: 0, y: 5, z: 10 },  // Position identique à position initiale
+        },
     }
 };

@@ -7,7 +7,7 @@
 import * as THREE from 'three';
 import { SimulationConfig, DEFAULT_CONFIG } from './SimulationConfig';
 import { EventBus, SimulationEventType } from './types/Events';
-import { createInitialState, SimulationState } from './types/PhysicsState';
+import { createInitialState, SimulationState, KitePhysicsState } from './types/PhysicsState';
 
 // Domain
 import { Kite, KiteFactory } from '../domain/kite/Kite';
@@ -27,11 +27,11 @@ import { KiteVisualizer } from '../infrastructure/rendering/visualizers/KiteVisu
 import { 
     LinesVisualizer, 
     TrajectoryVisualizer, 
-    DebugVisualizer,
-    PanelForceVisualizer,
+    PanelForceVisualizer, // ✅ Visualiseur unifié (remplace DebugVisualizer)
     ControlStationVisualizer,
     GeometryLabelsVisualizer,
-    PanelNumbersVisualizer
+    PanelNumbersVisualizer,
+    PanelNormalsVisualizer
 } from '../infrastructure/rendering/visualizers/VisualizersBundle';
 
 // Application
@@ -71,11 +71,11 @@ export class NewSimulation {
     private kiteVisualizer: KiteVisualizer;
     private linesVisualizer: LinesVisualizer;
     private trajectoryVisualizer: TrajectoryVisualizer;
-    private debugVisualizer: DebugVisualizer;
-    private panelForceVisualizer: PanelForceVisualizer;
+    private forceVisualizer: PanelForceVisualizer; // ✅ Visualiseur unifié pour tous les modes
     private controlStationVisualizer: ControlStationVisualizer;
     private geometryLabelsVisualizer: GeometryLabelsVisualizer;
     private panelNumbersVisualizer: PanelNumbersVisualizer;
+    private panelNormalsVisualizer: PanelNormalsVisualizer;
     
     // Contrôle
     private currentDelta = 0;
@@ -86,20 +86,24 @@ export class NewSimulation {
     private isPaused = false;
     private lastLogTime = 0;
     private lastCameraMode: CameraMode = CameraMode.ORBIT;
+    private savedCameraState?: { position: THREE.Vector3; target: THREE.Vector3; distance: number; azimuth: number; elevation: number };
     private uiReference?: UserInterface; // Référence à l'UI pour mise à jour
     
     // ✅ AMÉLIORATION: Accumulation du temps pour fixed timestep stable
     private accumulator = 0; // Temps accumulé non simulé
-    private readonly maxSubsteps = 5; // Limite de sous-pas pour éviter spiral of death
     
     // Mode debug géométrie
     private geometryDebugMode = false;
-    private geometryDebugPosition = new THREE.Vector3(0, 2, 2);
+    private geometryDebugPosition = new THREE.Vector3();
     
     // Mode debug portance
     private liftDebugMode = false;
-    private liftDebugPosition = new THREE.Vector3(0, 5, 10);
+    private liftDebugPosition = new THREE.Vector3();
     private liftDebugOrientation = new THREE.Quaternion();
+    
+    // Auto-reset au sol
+    private groundStabilityTime = 0; // s - Temps passé au sol stable
+
     
     constructor(container: HTMLElement, config?: Partial<SimulationConfig>) {
         this.config = { ...DEFAULT_CONFIG, ...config };
@@ -164,6 +168,7 @@ export class NewSimulation {
         
         forceManager.addCalculator(new GravityForceCalculator(
             this.kite.properties.mass,
+            this.kite,
             this.config.physics.gravity
         ));
         
@@ -189,11 +194,11 @@ export class NewSimulation {
         this.kiteVisualizer = new KiteVisualizer(this.kite);
         this.linesVisualizer = new LinesVisualizer();
         this.trajectoryVisualizer = new TrajectoryVisualizer();
-        this.debugVisualizer = new DebugVisualizer();
-        this.panelForceVisualizer = new PanelForceVisualizer();
+        this.forceVisualizer = new PanelForceVisualizer(); // ✅ Visualiseur unifié
         this.controlStationVisualizer = new ControlStationVisualizer();
         this.geometryLabelsVisualizer = new GeometryLabelsVisualizer();
         this.panelNumbersVisualizer = new PanelNumbersVisualizer();
+        this.panelNormalsVisualizer = new PanelNormalsVisualizer();
         
         // Récupérer positions treuils pour initialiser le calculateur de lignes
         const winchPositions = this.controlStationVisualizer.getWinchPositions();
@@ -224,7 +229,12 @@ export class NewSimulation {
                 damping: this.config.lines.damping,
                 smoothingCoefficient: this.config.lines.smoothingCoefficient,
                 minTension: this.config.lines.minTension,
-            }
+                exponentialThreshold: this.config.lines.exponentialThreshold,
+                exponentialStiffness: this.config.lines.exponentialStiffness,
+                exponentialRate: this.config.lines.exponentialRate,
+            },
+            // 🎯 NOUVEAUTÉ : Configuration du système de brides
+            this.config.lines.bridles
         );
         
         this.physicsEngine.setLineForceCalculator(lineCalculator);
@@ -235,16 +245,17 @@ export class NewSimulation {
         this.scene.add(this.kiteVisualizer.getObject3D());
         this.linesVisualizer.getObjects().forEach(line => this.scene.add(line));
         this.scene.add(this.trajectoryVisualizer.getObject());
-        this.scene.add(this.debugVisualizer.getObject());
-        this.scene.add(this.panelForceVisualizer.getObject());
+        this.scene.add(this.forceVisualizer.getObject()); // ✅ Visualiseur unifié
         this.scene.add(this.controlStationVisualizer.getObject3D());
         this.scene.add(this.geometryLabelsVisualizer.getObject());
         this.scene.add(this.panelNumbersVisualizer.getObject());
+        this.scene.add(this.panelNormalsVisualizer.getObject3D());
         
         // Configurer visibilité debug
-        this.debugVisualizer.setVisible(this.config.rendering.showDebug);
-        this.panelForceVisualizer.setVisible(false); // Invisible par défaut, activé en mode debug portance
-        this.panelNumbersVisualizer.setVisible(true); // Visible par défaut
+        this.forceVisualizer.setVisible(this.config.rendering.showDebug);
+        console.log(`🔍 Vecteurs de forces: ${this.config.rendering.showDebug ? 'ACTIVÉS ✅' : 'DÉSACTIVÉS ❌'}`);
+        this.panelNumbersVisualizer.setVisible(true);
+        this.panelNormalsVisualizer.getObject3D().visible = true;
         
         // 6. Configurer événements
         this.setupEventListeners();
@@ -257,6 +268,17 @@ export class NewSimulation {
         
         // 9. Démarrer boucle
         this.logger.info('🪁 Nouvelle simulation initialisée !');
+        console.log('\n═══════════════════════════════════════════════════════');
+        console.log('🪁 SIMULATION KITE v6 - Configuration');
+        console.log('═══════════════════════════════════════════════════════');
+        console.log(`📊 Vecteurs forces: ${this.config.rendering.showDebug ? '✅ ACTIFS (mode détaillé par panneau)' : '❌ DÉSACTIVÉS'}`);
+        console.log(`🔄 Auto-reset: ${this.config.behavior.autoReset.enabled ? '✅' : '❌'} Actif (${this.config.behavior.autoReset.stabilityDuration}s au sol < ${this.config.behavior.autoReset.groundThreshold}m)`);
+        console.log(`⚙️  Timestep physique: ${this.config.physics.fixedTimeStep ? (this.config.physics.fixedTimeStep * 1000).toFixed(2) + 'ms' : 'variable'}`);
+        console.log(`💨 Vent: ${this.config.wind.speed} m/s (vecteur: 0, 0, ${this.config.wind.speed})`);
+        console.log(`⚖️  Masse kite: ${this.config.kite.mass} kg`);
+        console.log(`📍 Position initiale: ${this.kite.getState().position.toArray().map(v => v.toFixed(1)).join(', ')}`);
+        console.log(`🧭 Orientation: ${this.kite.getState().orientation.toArray().map(v => v.toFixed(3)).join(', ')}`);
+        console.log('═══════════════════════════════════════════════════════\n');
         this.startLoop();
     }
     
@@ -448,7 +470,7 @@ export class NewSimulation {
         
         // ✅ FIXED TIMESTEP: Simuler par pas fixes tant qu'il reste du temps
         let substeps = 0;
-        while (this.accumulator >= fixedDt && substeps < this.maxSubsteps) {
+        while (this.accumulator >= fixedDt && substeps < this.config.physics.maxSubsteps) {
             this.updatePhysics(fixedDt);
             this.accumulator -= fixedDt;
             substeps++;
@@ -456,7 +478,7 @@ export class NewSimulation {
         
         // Si trop de sous-pas nécessaires (FPS très bas), réinitialiser accumulator
         // pour éviter "spiral of death"
-        if (substeps >= this.maxSubsteps) {
+        if (substeps >= this.config.physics.maxSubsteps) {
             this.accumulator = 0;
         }
         
@@ -471,7 +493,8 @@ export class NewSimulation {
         // Mode debug géométrie : fige le cerf-volant à une position fixe
         if (this.geometryDebugMode) {
             const state = this.kite.getState();
-            state.position.copy(this.geometryDebugPosition);
+            const debugPos = this.config.behavior.debugPositions.geometry;
+            state.position.set(debugPos.x, debugPos.y, debugPos.z);
             state.velocity.set(0, 0, 0);
             state.angularVelocity.set(0, 0, 0);
             
@@ -517,6 +540,7 @@ export class NewSimulation {
             this.linesVisualizer.update(winchPositions.left, winchPositions.right, this.kite);
             this.geometryLabelsVisualizer.update(this.kite, this.controlStationVisualizer);
             this.panelNumbersVisualizer.update(this.kite);
+            this.panelNormalsVisualizer.update(this.kite, state);
             
             // Publier événement
             this.eventBus.publish({
@@ -535,7 +559,8 @@ export class NewSimulation {
             const simState = this.physicsEngine.update(fixedDt, this.currentDelta);
             
             // Mais forcer la position et l'orientation fixes
-            state.position.copy(this.liftDebugPosition);
+            const debugPos = this.config.behavior.debugPositions.lift;
+            state.position.set(debugPos.x, debugPos.y, debugPos.z);
             state.velocity.set(0, 0, 0);
             state.angularVelocity.set(0, 0, 0);
             state.orientation.copy(this.liftDebugOrientation);
@@ -566,15 +591,28 @@ export class NewSimulation {
             // Mise à jour des numéros de panneaux
             this.panelNumbersVisualizer.update(this.kite);
             
-            // Mode debug portance : afficher forces par panneau au lieu du debug standard
-            this.debugVisualizer.setVisible(false);
-            this.panelForceVisualizer.setVisible(true);
-            this.panelForceVisualizer.updatePanelForces(
-                this.kite,
-                fixedSimState.kite,
-                fixedSimState.wind,
-                fixedSimState.forces.gravity
-            );
+            // Mise à jour des normales de panneaux
+            this.panelNormalsVisualizer.update(this.kite, state);
+            
+            // ✅ Mode debug portance : visualiseur unifié en mode détaillé (forces par panneau)
+            this.forceVisualizer.setVisible(true);
+            
+            // Récupérer les forces RÉELLES par panneau depuis le moteur physique
+            const aeroResult = this.physicsEngine.getLastAeroResult();
+            const centerOfMass = this.kite.getCenterOfMass();
+            
+            if (aeroResult && aeroResult.panelForces) {
+                this.forceVisualizer.updateForces(
+                    this.kite,
+                    fixedSimState.kite,
+                    {
+                        panelForces: aeroResult.panelForces, // Forces réelles du moteur
+                        forces: { gravity: fixedSimState.forces.gravity },
+                        centerOfMass,
+                        showAggregatedForces: false // ✅ Mode détaillé (par panneau)
+                    }
+                );
+            }
             
             // Logging périodique
             this.lastLogTime += fixedDt;
@@ -627,22 +665,39 @@ export class NewSimulation {
         // Mise à jour des numéros de panneaux
         this.panelNumbersVisualizer.update(this.kite);
         
+        // Mise à jour des normales de panneaux
+        this.panelNormalsVisualizer.update(this.kite, simState.kite);
+        
         // Trajectoire (ajout conditionnel)
         if (simState.elapsedTime % 0.1 < fixedDt) {
             this.trajectoryVisualizer.addPoint(simState.kite.position);
         }
         
-        // Debug forces
+        // ✅ Debug forces : visualiseur unifié en mode DÉTAILLÉ (forces par panneau)
         if (this.config.rendering.showDebug) {
-            this.debugVisualizer.updateForceVectors(simState.kite.position, {
-                aerodynamic: simState.forces.aerodynamic,
-                gravity: simState.forces.gravity,
-                lines: simState.forces.lines,
-                linesLeft: simState.forces.linesLeft,
-                linesRight: simState.forces.linesRight,
-                total: simState.forces.total,
-                torque: simState.forces.torque,
-            });
+            const centerOfMass = this.kite.getCenterOfMass();
+            
+            // Récupérer les forces par panneau depuis le moteur physique
+            const aeroResult = this.physicsEngine.getLastAeroResult();
+            
+            if (aeroResult && aeroResult.panelForces) {
+                this.forceVisualizer.updateForces(
+                    this.kite,
+                    simState.kite,
+                    {
+                        panelForces: aeroResult.panelForces, // Forces détaillées par panneau
+                        forces: { 
+                            gravity: simState.forces.gravity,
+                            lines: simState.forces.lines,
+                            linesLeft: simState.forces.linesLeft,
+                            linesRight: simState.forces.linesRight,
+                            total: simState.forces.total,
+                        },
+                        centerOfMass,
+                        showAggregatedForces: false // ✅ Mode DÉTAILLÉ (par panneau)
+                    }
+                );
+            }
         }
         
         // Logging périodique
@@ -651,6 +706,9 @@ export class NewSimulation {
             this.logState(simState);
             this.lastLogTime = 0;
         }
+        
+        // ✅ Vérifier si le kite est au sol et stable (auto-reset)
+        this.checkGroundStability(simState.kite, fixedDt);
         
         // Publier événement
         this.eventBus.publish({
@@ -672,6 +730,21 @@ export class NewSimulation {
         const currentCameraMode = this.camera.getMode();
         if (currentCameraMode !== this.lastCameraMode) {
             this.lastCameraMode = currentCameraMode;
+        }
+        
+        // Mettre à jour l'affichage des informations de la caméra dans l'UI
+        if (this.uiReference) {
+            const cameraState = this.camera.getState();
+            this.uiReference.updateCameraInfo(
+                {
+                    x: cameraState.position.x,
+                    y: cameraState.position.y,
+                    z: cameraState.position.z
+                },
+                cameraState.azimuth,
+                cameraState.elevation,
+                cameraState.distance
+            );
         }
     }
     
@@ -830,6 +903,44 @@ export class NewSimulation {
     };
     
     /**
+     * Vérifie si le kite est au sol et stable, déclenche un auto-reset après 2s.
+     */
+    private checkGroundStability(state: KitePhysicsState, deltaTime: number): void {
+        if (!this.config.behavior.autoReset.enabled) return;
+        
+        const altitude = state.position.y;
+        const velocity = state.velocity.length();
+        
+        // Vérifier si le kite est au sol ET stable (vitesse quasi nulle)
+        const isGrounded = altitude < this.config.behavior.autoReset.groundThreshold;
+        const isStable = velocity < this.config.behavior.autoReset.velocityThreshold;
+        
+        if (isGrounded && isStable) {
+            // Accumuler le temps au sol
+            this.groundStabilityTime += deltaTime;
+            
+            // Log toutes les 0.5s pour suivre la progression
+            if (Math.floor(this.groundStabilityTime * 2) !== Math.floor((this.groundStabilityTime - deltaTime) * 2)) {
+                console.log(`⏱️ Kite au sol stable: ${this.groundStabilityTime.toFixed(1)}s / ${this.config.behavior.autoReset.stabilityDuration}s`);
+            }
+            
+            // Si au sol stable pendant plus de 2s, déclencher auto-reset
+            if (this.groundStabilityTime >= this.config.behavior.autoReset.stabilityDuration) {
+                console.log(`🔄 AUTO-RESET déclenché après ${this.groundStabilityTime.toFixed(1)}s au sol`);
+                this.logger.warning(`⚠️ Cerf-volant au sol stable depuis ${this.groundStabilityTime.toFixed(1)}s - AUTO-RESET`);
+                this.reset();
+                this.groundStabilityTime = 0;
+            }
+        } else {
+            // Réinitialiser le compteur si le kite n'est plus au sol ou bouge
+            if (this.groundStabilityTime > 0.1) { // Log seulement si timer significatif
+                console.log(`✅ Kite décollé ou en mouvement - Timer réinitialisé (était à ${this.groundStabilityTime.toFixed(1)}s)`);
+            }
+            this.groundStabilityTime = 0;
+        }
+    }
+    
+    /**
      * Réinitialise la simulation (méthode publique pour l'UI).
      */
     public reset(): void {
@@ -842,7 +953,6 @@ export class NewSimulation {
             
             if (this.liftDebugMode) {
                 this.liftDebugMode = false;
-                this.panelForceVisualizer.setVisible(false);
                 console.log('🔄 [RESET] Mode debug portance désactivé');
             }
             
@@ -851,10 +961,8 @@ export class NewSimulation {
                 console.log('🔄 [RESET] Mode debug géométrie désactivé');
             }
             
-            // Rétablir le visualiseur debug standard si configuré
-            if (this.config.rendering.showDebug) {
-                this.debugVisualizer.setVisible(true);
-            }
+            // ✅ Le visualiseur unifié reste visible selon la config
+            // Il sera automatiquement utilisé en mode approprié
             
             const initialState = createInitialState();
             // ✅ CORRECTION: Position initiale Z=+10, Y=8
@@ -956,11 +1064,11 @@ export class NewSimulation {
         this.kiteVisualizer.dispose();
         this.linesVisualizer.dispose();
         this.trajectoryVisualizer.dispose();
-        this.debugVisualizer.dispose();
-        this.panelForceVisualizer.dispose();
+        this.forceVisualizer.dispose(); // ✅ Visualiseur unifié
         this.controlStationVisualizer.dispose();
         this.geometryLabelsVisualizer.dispose();
         this.panelNumbersVisualizer.dispose();
+        this.panelNormalsVisualizer.dispose();
         this.scene.dispose();
         this.renderer.dispose();
         this.camera.dispose();
@@ -1097,6 +1205,16 @@ export class NewSimulation {
         this.liftDebugMode = !this.liftDebugMode;
         
         if (this.liftDebugMode) {
+            // Sauvegarder l'état actuel de la caméra avant de la repositionner
+            const currentState = this.camera.getState();
+            this.savedCameraState = {
+                position: currentState.position.clone(),
+                target: currentState.target.clone(),
+                distance: currentState.distance,
+                azimuth: currentState.azimuth,
+                elevation: currentState.elevation
+            };
+            
             // Calculer l'orientation debug portance (45° vers l'avant)
             this.liftDebugOrientation.copy(this.getLiftDebugOrientation());
             
@@ -1110,9 +1228,8 @@ export class NewSimulation {
             state.angularVelocity.set(0, 0, 0);
             state.orientation.copy(this.liftDebugOrientation);
             
-            // Activer le visualiseur de forces par panneau
-            this.panelForceVisualizer.setVisible(true);
-            this.debugVisualizer.setVisible(false);
+            // ✅ Le visualiseur unifié est déjà visible, pas besoin de changer la visibilité
+            // Il sera automatiquement utilisé en mode détaillé par la boucle animate()
             
             // Désactiver le mode debug géométrie si actif
             if (this.geometryDebugMode) {
@@ -1120,14 +1237,37 @@ export class NewSimulation {
                 this.logger.control('🔍 Mode debug géométrie DÉSACTIVÉ (remplacé par debug portance)');
             }
             
-            this.logger.control('🪁 Mode debug PORTANCE ACTIVÉ - Kite figé à (0, 5, 10) avec inclinaison 45° - Forces par panneau');
-        } else {
-            // Désactiver le visualiseur de forces par panneau
-            this.panelForceVisualizer.setVisible(false);
+            // Positionner la caméra pour une vue optimale du mode portance
+            // Position: X: -1.32 m, Y: 8.50 m, Z: 13.15 m
+            // Orientation: Azimut: -19.4°, Élévation: 47.0°, Distance: 7.85 m
+            const azimuthRad = -19.4 * Math.PI / 180;
+            const elevationRad = 47.0 * Math.PI / 180;
             
-            // Rétablir l'affichage debug standard si activé dans config
-            if (this.config.rendering.showDebug) {
-                this.debugVisualizer.setVisible(true);
+            this.camera.setState({
+                position: new THREE.Vector3(-1.32, 8.50, 13.15),
+                target: state.position.clone(),
+                distance: 7.85,
+                azimuth: azimuthRad,
+                elevation: elevationRad
+            });
+            
+            this.logger.control('🪁 Mode debug PORTANCE ACTIVÉ - Kite figé à (0, 5, 10) avec inclinaison 45° - Forces par panneau');
+            this.logger.control('📹 Caméra positionnée pour vue optimale des forces de portance');
+        } else {
+            // ✅ Le visualiseur unifié reste visible, il sera automatiquement utilisé en mode agrégé
+            // par la boucle animate() si showDebug est activé
+            
+            // Restaurer l'état de la caméra sauvegardé
+            if (this.savedCameraState) {
+                this.camera.setState({
+                    position: this.savedCameraState.position,
+                    target: this.savedCameraState.target,
+                    distance: this.savedCameraState.distance,
+                    azimuth: this.savedCameraState.azimuth,
+                    elevation: this.savedCameraState.elevation
+                });
+                this.logger.control('📹 Position de la caméra restaurée');
+                this.savedCameraState = undefined;
             }
             
             this.logger.control('🪁 Mode debug PORTANCE DÉSACTIVÉ');
@@ -1180,7 +1320,7 @@ export class NewSimulation {
      */
     public toggleForceVectors(): void {
         this.config.rendering.showDebug = !this.config.rendering.showDebug;
-        this.debugVisualizer.setVisible(this.config.rendering.showDebug);
+        this.forceVisualizer.setVisible(this.config.rendering.showDebug); // ✅ Visualiseur unifié
         
         this.logger.control(
             `🔍 Vecteurs de forces: ${this.config.rendering.showDebug ? 'ACTIVÉS ✅' : 'DÉSACTIVÉS ❌'}`

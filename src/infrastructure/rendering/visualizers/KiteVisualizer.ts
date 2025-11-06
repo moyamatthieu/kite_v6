@@ -46,10 +46,18 @@ export class KiteVisualizer {
         });
 
         // Panneaux de toile
+        const seamMaterial = new THREE.LineBasicMaterial({
+            color: 0x444444,  // Gris foncé pour les coutures
+            linewidth: 2,
+            opacity: 0.9,
+            transparent: true
+        });
+        
         for (let i = 0; i < this.kite.geometry.getPanelCount(); i++) {
             const points = this.kite.geometry.getPanelPoints(i);
             if (points.length >= 3) {
                 this.addPanel(points, fabricMaterial);
+                this.addPanelSeam(points, seamMaterial);
             }
         }
 
@@ -93,6 +101,18 @@ export class KiteVisualizer {
         geometry.computeVertexNormals();
         const panel = new THREE.Mesh(geometry, material);
         this.group.add(panel);
+    }
+
+    /**
+     * Ajoute un liseré/couture sur le pourtour d'un panneau.
+     */
+    private addPanelSeam(points: THREE.Vector3[], material: THREE.LineBasicMaterial): void {
+        // Créer une boucle fermée pour le contour
+        const seamPoints = [...points, points[0]];
+        const geometry = new THREE.BufferGeometry().setFromPoints(seamPoints);
+        const line = new THREE.Line(geometry, material);
+        line.frustumCulled = false;
+        this.group.add(line);
     }
 
     /**

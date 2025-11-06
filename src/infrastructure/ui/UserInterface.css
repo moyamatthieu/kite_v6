@@ -105,6 +105,22 @@
     pointer-events: auto;
 }
 
+/* Panneau d'information de la caméra (bas droite, au-dessus de l'autopilote) */
+#camera-info-panel {
+    position: fixed;
+    bottom: 540px;
+    right: 20px;
+    width: 250px;
+    background: rgba(20, 20, 30, 0.95);
+    border: 2px solid rgba(0, 170, 255, 0.3);
+    border-radius: 12px;
+    padding: 15px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    z-index: 1000;
+    pointer-events: auto;
+}
+
 /* Panneau de log (bas gauche) */
 #log-panel {
     position: fixed;
@@ -555,4 +571,15 @@ input:checked + .toggle-slider:before {
     cursor: pointer;
     border: none;
     box-shadow: 0 0 6px rgba(0, 255, 136, 0.5);
+}
+
+/* Bouton copier caméra */
+#btn-copy-camera:hover {
+    background: rgba(0, 170, 255, 0.2) !important;
+    border-color: rgba(0, 170, 255, 0.5) !important;
+    transform: scale(1.05);
+}
+
+#btn-copy-camera:active {
+    transform: scale(0.95);
 }

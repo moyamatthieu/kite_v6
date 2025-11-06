@@ -153,6 +153,40 @@ export class Kite {
             altitude: lowestAltitude
         };
     }
+    
+    /**
+     * Calcule le centre de masse théorique du cerf-volant.
+     * 
+     * Avec la masse répartie proportionnellement sur chaque panneau :
+     * CM = Σ(m_i × r_i) / M_total
+     * où m_i = masse du panneau i, r_i = position du centroïde du panneau i
+     * 
+     * @returns Position du centre de masse en coordonnées globales
+     */
+    getCenterOfMass(): THREE.Vector3 {
+        const totalMass = this.properties.mass;
+        const totalArea = this.getTotalArea();
+        const centerOfMass = new THREE.Vector3(0, 0, 0);
+        
+        const panelCount = this.getPanelCount();
+        
+        for (let i = 0; i < panelCount; i++) {
+            // Masse du panneau (proportionnelle à sa surface)
+            const panelArea = this.getPanelArea(i);
+            const panelMass = (panelArea / totalArea) * totalMass;
+            
+            // Position du centroïde du panneau en coordonnées globales
+            const panelCentroid = this.getGlobalPanelCentroid(i);
+            
+            // Contribution au centre de masse : m_i × r_i
+            centerOfMass.addScaledVector(panelCentroid, panelMass);
+        }
+        
+        // Diviser par la masse totale
+        centerOfMass.divideScalar(totalMass);
+        
+        return centerOfMass;
+    }
 }
 
 /**

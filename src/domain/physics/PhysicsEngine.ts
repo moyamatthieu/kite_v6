@@ -7,8 +7,8 @@
 import { Kite } from '../kite/Kite';
 import { KitePhysicsState, WindState, Forces, SimulationState } from '../../core/types/PhysicsState';
 import { IIntegrator } from './integrators/Integrator';
-import { ForceManager } from './forces/ForceCalculator';
-import { ILineForceCalculator, LineForceResult } from './forces/ForceCalculator';
+import { ForceManager, IAerodynamicForceCalculator, IGravityForceCalculator } from './forces/ForceCalculator';
+import { ILineForceCalculator, LineForceResult, AerodynamicForceResult } from './forces/ForceCalculator';
 import * as THREE from 'three';
 
 /**
@@ -49,6 +49,9 @@ export class PhysicsEngine {
         total: new THREE.Vector3(0, 0, 0),
         torque: new THREE.Vector3(0, 0, 0),
     };
+    
+    // ✅ Cache du dernier résultat aérodynamique détaillé (pour visualisation forces par panneau)
+    private lastAeroResult?: AerodynamicForceResult;
     
     // Cache du dernier résultat complet des lignes pour éviter les recalculs inutiles
     private lastLineResult?: LineForceResult;
@@ -96,22 +99,41 @@ export class PhysicsEngine {
         this.lastForces.aerodynamic.set(0, 0, 0);
         this.lastForces.gravity.set(0, 0, 0);
 
-        // 1a. Force aérodynamique
+        // 1a. Force aérodynamique (calcul détaillé pour visualisation + couple)
+        let aeroTorque = new THREE.Vector3(0, 0, 0);
         for (const calculator of this.forceManager.getCalculators()) {
             if (calculator.name === 'AerodynamicForce') {
-                const aeroForce = calculator.calculate(currentState, this.windState, dt);
+                // ✅ Utiliser calculateDetailed pour récupérer les forces par panneau
+                const aeroCalculator = calculator as IAerodynamicForceCalculator;
+                this.lastAeroResult = aeroCalculator.calculateDetailed(currentState, this.windState, dt);
+                
+                const aeroForce = this.lastAeroResult.total;
                 totalForce.add(aeroForce);
                 this.lastForces.aerodynamic.copy(aeroForce);
+                
+                // ✅ Calculer le couple aérodynamique dû à la répartition des forces sur les panneaux
+                if (aeroCalculator.calculateTorque) {
+                    aeroTorque = aeroCalculator.calculateTorque(currentState, this.windState);
+                }
+                
                 break; // On prend le premier (et normalement unique) calculateur aéro
             }
         }
 
-        // 1b. Force de gravité
+        // 1b. Force de gravité (avec couple dû à la répartition de masse)
+        let gravityTorque = new THREE.Vector3(0, 0, 0);
         for (const calculator of this.forceManager.getCalculators()) {
             if (calculator.name === 'GravityForce') {
                 const gravityForce = calculator.calculate(currentState, this.windState, dt);
                 totalForce.add(gravityForce);
                 this.lastForces.gravity.copy(gravityForce);
+                
+                // ✅ Calculer le couple gravitationnel dû à la répartition de masse sur les panneaux
+                const gravityCalculator = calculator as IGravityForceCalculator;
+                if (gravityCalculator.calculateTorque) {
+                    gravityTorque = gravityCalculator.calculateTorque(currentState);
+                }
+                
                 break; // On prend le premier (et normalement unique) calculateur gravité
             }
         }
@@ -165,11 +187,17 @@ export class PhysicsEngine {
             this.lastForces.torque.set(0, 0, 0);
         }
 
+        // 2. Couple total (aérodynamique + gravité + lignes)
+        const totalTorque = new THREE.Vector3()
+            .add(aeroTorque)
+            .add(gravityTorque)
+            .add(linesTorque);
+
         // 3. Intégrer pour obtenir le nouvel état
         const newState = this.integrator.integrate(
             currentState,
             totalForce,
-            linesTorque,
+            totalTorque,
             dt,
             this.kite.properties.mass
         );
@@ -354,6 +382,14 @@ export class PhysicsEngine {
      */
     getLastForces(): Readonly<Forces> {
         return this.lastForces;
+    }
+    
+    /**
+     * Retourne le dernier résultat aérodynamique détaillé (pour visualisation).
+     * ✅ Inclut les forces par panneau calculées par le moteur physique.
+     */
+    getLastAeroResult(): Readonly<AerodynamicForceResult> | undefined {
+        return this.lastAeroResult;
     }
     
     /**

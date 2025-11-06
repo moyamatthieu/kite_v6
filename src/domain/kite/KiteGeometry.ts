@@ -2,18 +2,36 @@
  * Géométrie pure du cerf-volant (calculs mathématiques sans Three.js).
  * 
  * ═══════════════════════════════════════════════════════════════════════════════
- * REPÈRE LOCAL DU CERF-VOLANT (avant rotation d'orientation)
+ * REPÈRE LOCAL DU CERF-VOLANT ET ORIENTATION DES FACES
  * ═══════════════════════════════════════════════════════════════════════════════
- * La géométrie est définie dans le repère local du cerf-volant :
+ * 
+ * REPÈRE LOCAL (avant rotation d'orientation en simulation) :
  * - X+ = droite (aile droite)
  * - Y+ = haut (vers le nez)
- * - Z+ = avant (vers où regarde le kite AVANT rotation)
+ * - Z+ = AVANT du cerf-volant (où il regarde AVANT rotation)
  * 
- * ⚠️ PANNEAUX : Ordre HORAIRE vu de face → normales pointent vers Z- (intrados)
- * Les normales DOIVENT pointer vers l'intrados (face qui reçoit le vent)
+ * INTRADOS vs EXTRADOS (définition physique claire) :
  * 
- * ⚠️ ORIENTATION : En simulation, rotation de 180° sur Y appliquée pour que
- * le kite regarde vers Z- (station) au lieu de Z+ dans le repère monde.
+ * - **INTRADOS** = Face AVANT du cerf-volant, celle qui REÇOIT LE VENT
+ *   └─> Orientée vers Z+ en repère local (face avant)
+ *   └─> C'est la face "concave" qui génère la portance
+ *   └─> Les brides et points de contrôle sont attachés sur cette face
+ * 
+ * - **EXTRADOS** = Face ARRIÈRE du cerf-volant, côté opposé au vent
+ *   └─> Orientée vers Z- en repère local (face arrière)
+ *   └─> C'est la face "convexe", le dos du cerf-volant
+ *   └─> Face visible quand on regarde le cerf-volant de dos
+ * 
+ * RÈGLE DE CONSTRUCTION DES PANNEAUX :
+ * Pour que les normales pointent vers l'INTRADOS (face qui reçoit le vent, Z+) :
+ * - Les points doivent être définis dans l'ordre HORAIRE vu de l'intrados (Z+)
+ * - Calcul : normale = (p1-p0) × (p2-p0), qui pointera vers Z+ si ordre horaire
+ * - ⚠️ ATTENTION : Three.js utilise la règle de la main droite
+ * 
+ * ⚠️ ORIENTATION EN SIMULATION :
+ * Le kite subit une rotation de 180° sur Y pour regarder vers Z- (station de pilotage)
+ * Après cette rotation : intrados (Z+ local) devient face à Z- monde (vers station/vent)
+ * 
  * ═══════════════════════════════════════════════════════════════════════════════
  * 
  * @module domain/kite/KiteGeometry
@@ -295,22 +313,45 @@ export class KiteGeometry {
      * Les normales doivent pointer vers la station de contrôle (Z-) pour recevoir le vent correctement.
      */
     private definePanels(): void {
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // CONSTRUCTION DES PANNEAUX
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Ordre des points : HORAIRE vu de l'INTRADOS (face Z+)
+        // → Les normales pointeront vers Z+ (intrados, face qui reçoit le vent)
+        // 
+        // Règle de la main droite : normale = (p1-p0) × (p2-p0)
+        // Pour que la normale pointe vers l'observateur, les points doivent être en ordre HORAIRE
+        // 
+        // Visualisation depuis l'intrados (face avant du kite, Z+) :
+        //
+        //            NEZ (haut, Y+)
+        //           /   \
+        //          /  0  \  1
+        //         /       \
+        //    STAB_G  BAS_COLONNE  STAB_D
+        //        |       |       |
+        //        |   2   |   3   |
+        //        |       |       |
+        //   EXT_AILE_G       EXT_AILE_D
+        //
+        // ═══════════════════════════════════════════════════════════════════════════════
+        
         this.panels = [
-            // Panneau supérieur gauche (index 0)
-            // 🔧 INVERSÉ : Ordre horaire vu de face → normale vers Z- (intrados)
-            ['NEZ', 'BAS_COLONNE', 'STAB_GAUCHE', 'TRAVERSE_GAUCHE'],
+            // Panneau 0 : Supérieur gauche (triangle NEZ - BAS_COLONNE - STAB_GAUCHE)
+            // Ordre HORAIRE vu de l'intrados (Z+) pour normale vers Z+ : NEZ → BAS_COLONNE → STAB_GAUCHE
+            ['NEZ', 'BAS_COLONNE', 'STAB_GAUCHE'],
             
-            // Panneau supérieur droit (index 1)
-            // 🔧 INVERSÉ : Ordre horaire vu de face → normale vers Z- (intrados)
-            ['NEZ', 'TRAVERSE_DROITE', 'STAB_DROIT', 'BAS_COLONNE'],
+            // Panneau 1 : Supérieur droit (triangle NEZ - STAB_DROIT - BAS_COLONNE)
+            // Ordre HORAIRE vu de l'intrados (Z+) pour normale vers Z+ : NEZ → STAB_DROIT → BAS_COLONNE
+            ['NEZ', 'STAB_DROIT', 'BAS_COLONNE'],
             
-            // Panneau inférieur gauche (index 2)
-            // 🔧 CORRECTION : Triangle valide au lieu de quadrilatère dégénéré
-            ['TRAVERSE_GAUCHE', 'BASE_STAB_GAUCHE', 'EXTREMITE_AILE_GAUCHE'],
+            // Panneau 2 : Inférieur gauche (triangle NEZ - STAB_GAUCHE - EXTREMITE_AILE_GAUCHE)
+            // Ordre HORAIRE vu de l'intrados (Z+) pour normale vers Z+ : NEZ → STAB_GAUCHE → EXTREMITE_AILE_GAUCHE
+            ['NEZ', 'STAB_GAUCHE', 'EXTREMITE_AILE_GAUCHE'],
             
-            // Panneau inférieur droit (index 3)
-            // 🔧 CORRECTION : Triangle valide au lieu de quadrilatère dégénéré
-            ['TRAVERSE_DROITE', 'EXTREMITE_AILE_DROITE', 'BASE_STAB_DROIT'],
+            // Panneau 3 : Inférieur droit (triangle NEZ - EXTREMITE_AILE_DROITE - STAB_DROIT)
+            // Ordre HORAIRE vu de l'intrados (Z+) pour normale vers Z+ : NEZ → EXTREMITE_AILE_DROITE → STAB_DROIT
+            ['NEZ', 'EXTREMITE_AILE_DROITE', 'STAB_DROIT'],
         ];
     }
     
@@ -361,6 +402,14 @@ export class KiteGeometry {
     
     /**
      * Calcule la normale d'un panneau (règle main droite).
+     * 
+     * ✅ CONVENTION ÉTABLIE : Les normales pointent vers l'INTRADOS (Z+ en local)
+     * - INTRADOS = Face qui REÇOIT le vent (face avant, Z+)
+     * - EXTRADOS = Face arrière, dos du cerf-volant (Z-)
+     * 
+     * Calcul : normale = (p1-p0) × (p2-p0)
+     * Les panneaux sont définis en ordre ANTI-HORAIRE vu de l'intrados
+     * → normale pointe vers l'intrados (Z+)
      */
     getPanelNormal(panelIndex: number): Vector3D {
         const points = this.getPanelPoints(panelIndex);

@@ -35,11 +35,20 @@ export class UserInterface {
     private logPanel!: HTMLElement;
     private logContent!: HTMLElement;
     private autoPilotPanel!: HTMLElement;
+    private cameraInfoPanel!: HTMLElement;
     private controlSlider!: HTMLInputElement;
     private controlSliderValue!: HTMLElement;
     
     private logEntries: string[] = [];
     private maxLogEntries = 50;
+    
+    // Dernières informations de la caméra pour la copie
+    private lastCameraInfo = {
+        position: { x: 0, y: 0, z: 0 },
+        azimuth: 0,
+        elevation: 0,
+        distance: 0
+    };
     
     constructor(eventBus: EventBus, parent: HTMLElement, callbacks?: UICallbacks) {
         this.eventBus = eventBus;
@@ -63,6 +72,7 @@ export class UserInterface {
         this.createLogPanel();
         this.createControlSlider();
         this.createAutoPilotPanel();
+        this.createCameraInfoPanel();
     }
 
     /**
@@ -569,6 +579,57 @@ export class UserInterface {
     }
     
     /**
+     * Crée le panneau d'information de la caméra (bas droite, au-dessus de l'autopilote).
+     */
+    private createCameraInfoPanel(): void {
+        this.cameraInfoPanel = document.createElement('div');
+        this.cameraInfoPanel.id = 'camera-info-panel';
+        this.cameraInfoPanel.className = 'ui-panel';
+        
+        this.cameraInfoPanel.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(0, 255, 136, 0.2); padding-bottom: 8px;">
+                <div style="font-size: 13px; font-weight: 600; color: #00ff88;">
+                    📹 CAMÉRA
+                </div>
+                <button id="btn-copy-camera" style="
+                    background: rgba(0, 170, 255, 0.1);
+                    border: 1px solid rgba(0, 170, 255, 0.3);
+                    color: #00aaff;
+                    padding: 4px 8px;
+                    border-radius: 6px;
+                    font-size: 11px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                " title="Copier les informations de la caméra">
+                    📋
+                </button>
+            </div>
+            
+            <div style="font-size: 11px; color: #aaa; line-height: 1.8;">
+                <div style="margin-bottom: 8px;">
+                    <div style="color: #00aaff; font-weight: 600; margin-bottom: 4px;">Position</div>
+                    <div id="camera-position" style="font-family: 'Courier New', monospace; color: #fff;">
+                        X: 0.00 m<br>
+                        Y: 0.00 m<br>
+                        Z: 0.00 m
+                    </div>
+                </div>
+                
+                <div>
+                    <div style="color: #00aaff; font-weight: 600; margin-bottom: 4px;">Orientation</div>
+                    <div id="camera-orientation" style="font-family: 'Courier New', monospace; color: #fff;">
+                        Azimut: 0°<br>
+                        Élévation: 0°<br>
+                        Distance: 0.00 m
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        this.container.appendChild(this.cameraInfoPanel);
+    }
+    
+    /**
      * Configure les écouteurs d'événements.
      */
     private setupEventListeners(): void {
@@ -673,6 +734,10 @@ export class UserInterface {
         // Copier log
         const copyBtn = document.getElementById('btn-copy-log');
         copyBtn?.addEventListener('click', () => this.copyLog());
+        
+        // Copier informations caméra
+        const copyCameraBtn = document.getElementById('btn-copy-camera');
+        copyCameraBtn?.addEventListener('click', () => this.copyCameraInfo());
 
         // Toggle autopilote
         const toggleAutopilot = document.getElementById('toggle-autopilot') as HTMLInputElement;
@@ -775,6 +840,34 @@ export class UserInterface {
     }
     
     /**
+     * Copie les informations de la caméra dans le presse-papiers.
+     */
+    private async copyCameraInfo(): Promise<void> {
+        const { position, azimuth, elevation, distance } = this.lastCameraInfo;
+        const azimuthDeg = (azimuth * 180 / Math.PI).toFixed(1);
+        const elevationDeg = (elevation * 180 / Math.PI).toFixed(1);
+        
+        const cameraText = `INFORMATIONS CAMÉRA
+━━━━━━━━━━━━━━━━━━━━━
+Position:
+  X: ${position.x.toFixed(2)} m
+  Y: ${position.y.toFixed(2)} m
+  Z: ${position.z.toFixed(2)} m
+
+Orientation:
+  Azimut: ${azimuthDeg}°
+  Élévation: ${elevationDeg}°
+  Distance: ${distance.toFixed(2)} m`;
+        
+        try {
+            await navigator.clipboard.writeText(cameraText);
+            this.addLog('📋 Infos caméra copiées', 'success');
+        } catch (err) {
+            this.addLog('❌ Erreur lors de la copie', 'error');
+        }
+    }
+    
+    /**
      * Met à jour le statut de l'autopilote.
      */
     private updateAutopilotStatus(mode: string): void {
@@ -798,6 +891,45 @@ export class UserInterface {
         }
         
         this.addLog(`🎯 Mode: ${info.title}`, 'info');
+    }
+    
+    /**
+     * Met à jour les informations de la caméra.
+     * @param position - Position de la caméra dans le monde
+     * @param azimuth - Angle azimut en radians
+     * @param elevation - Angle d'élévation en radians
+     * @param distance - Distance de la caméra à la cible
+     */
+    public updateCameraInfo(
+        position: { x: number; y: number; z: number },
+        azimuth: number,
+        elevation: number,
+        distance: number
+    ): void {
+        // Stocker les dernières valeurs pour la copie
+        this.lastCameraInfo = { position, azimuth, elevation, distance };
+        
+        const positionDiv = document.getElementById('camera-position');
+        const orientationDiv = document.getElementById('camera-orientation');
+        
+        if (positionDiv) {
+            positionDiv.innerHTML = `
+                X: ${position.x.toFixed(2)} m<br>
+                Y: ${position.y.toFixed(2)} m<br>
+                Z: ${position.z.toFixed(2)} m
+            `;
+        }
+        
+        if (orientationDiv) {
+            const azimuthDeg = (azimuth * 180 / Math.PI).toFixed(1);
+            const elevationDeg = (elevation * 180 / Math.PI).toFixed(1);
+            
+            orientationDiv.innerHTML = `
+                Azimut: ${azimuthDeg}°<br>
+                Élévation: ${elevationDeg}°<br>
+                Distance: ${distance.toFixed(2)} m
+            `;
+        }
     }
     
     /**

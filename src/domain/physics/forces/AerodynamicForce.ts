@@ -63,7 +63,8 @@ import { Vector3D, KitePhysicsState, WindState } from '../../../core/types/Physi
 import { 
     IForceCalculator, 
     IAerodynamicForceCalculator, 
-    AerodynamicForceResult 
+    AerodynamicForceResult,
+    PanelForce 
 } from './ForceCalculator';
 import { Kite } from '../../kite/Kite';
 
@@ -131,6 +132,7 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         const totalForce = new THREE.Vector3(0, 0, 0);
         const totalLift = new THREE.Vector3(0, 0, 0);
         const totalDrag = new THREE.Vector3(0, 0, 0);
+        const panelForces: PanelForce[] = []; // ✅ Stocker les forces par panneau
         
         // Calculer le vent apparent (réutilise tempVector1)
         this.tempVector1.copy(wind.velocity).sub(state.velocity);
@@ -146,6 +148,7 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
                 apparentWind: this.tempVector1.clone(),
                 liftCoefficient: 0,
                 dragCoefficient: 0,
+                panelForces: [], // ✅ Tableau vide si pas de vent
             };
         }
         
@@ -165,6 +168,12 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
                 this.tempVector2, // windDirection
                 windSpeed
             );
+            
+            // ✅ Stocker les forces par panneau pour visualisation
+            panelForces.push({
+                lift: panelForce.lift.clone(),
+                drag: panelForce.drag.clone(),
+            });
             
             // Accumuler les forces (vectoriellement, chaque panneau contribue)
             totalLift.add(panelForce.lift);
@@ -192,7 +201,62 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
             apparentWind: this.tempVector1.clone(),
             liftCoefficient: this.getLiftCoefficient(avgAlpha),
             dragCoefficient: this.getDragCoefficient(avgAlpha),
+            panelForces, // ✅ Inclure les forces par panneau
         };
+    }
+    
+    /**
+     * Calcule le couple aérodynamique dû aux forces réparties sur les panneaux.
+     * 
+     * Pour chaque panneau :
+     * - Force aérodynamique = portance + traînée
+     * - Position = centroïde du panneau en coordonnées monde
+     * - Couple = r × F, où r = position_centroïde - centre_masse
+     * 
+     * @param state - État physique actuel
+     * @param wind - État du vent
+     * @returns Couple aérodynamique total (N·m)
+     */
+    calculateTorque(state: KitePhysicsState, wind: WindState): Vector3D {
+        const totalTorque = new THREE.Vector3(0, 0, 0);
+        
+        // Calculer le vent apparent
+        const apparentWind = new THREE.Vector3().subVectors(wind.velocity, state.velocity);
+        const windSpeed = apparentWind.length();
+        
+        if (windSpeed < 0.1) {
+            // Pas de vent → pas de couple aérodynamique
+            return totalTorque;
+        }
+        
+        const windDirection = apparentWind.clone().normalize();
+        const panelCount = this.kite.getPanelCount();
+        
+        for (let i = 0; i < panelCount; i++) {
+            // Calculer la force sur ce panneau
+            const panelForce = this.calculatePanelForce(
+                i,
+                state,
+                apparentWind,
+                windDirection,
+                windSpeed
+            );
+            
+            // Force totale sur le panneau (lift + drag)
+            const force = new THREE.Vector3().add(panelForce.lift).add(panelForce.drag);
+            
+            // Position du centroïde du panneau en coordonnées monde
+            const panelCentroid = this.kite.getGlobalPanelCentroid(i);
+            
+            // Vecteur du centre de masse vers le centroïde du panneau
+            const r = new THREE.Vector3().subVectors(panelCentroid, state.position);
+            
+            // Couple = r × F
+            const torque = new THREE.Vector3().crossVectors(r, force);
+            totalTorque.add(torque);
+        }
+        
+        return totalTorque;
     }
     
     /**
@@ -243,8 +307,11 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         // DIRECTION DES FORCES
         // ═══════════════════════════════════════════════════════════════════════════
         
-        // 🔧 TRAÎNÉE : Dans le sens du vent apparent (freine l'objet)
-        // Direction = direction du vent apparent
+        // 🔧 TRAÎNÉE : Pousse l'objet DANS LE SENS du flux de vent relatif
+        // La traînée s'oppose au mouvement relatif, donc pousse l'objet avec le flux
+        // apparentWind = wind.velocity - kite.velocity (vent vu depuis le kite)
+        // windDirection = normalize(apparentWind) = direction du flux relatif
+        // La force pousse DANS cette direction (pas de signe moins !)
         const drag = windDirection.clone().multiplyScalar(dragMagnitude);
 
         // 🔧 PORTANCE : Perpendiculaire au vent apparent
@@ -315,23 +382,28 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
      * 🪁 MODÈLE PHYSIQUE CERF-VOLANT RÉALISTE (corrigé)
      * 
      * La traînée augmente avec l'angle (plus de surface exposée).
-     * Cd = Cd_min + Cd_max × sin²(α)
+     * Cd = Cd_base + Cd_angle × sin²(α) + Cd_induit
      * 
-     * 🔧 CORRECTION : Traînée progressive, pas de seuils brutaux
-     * - 0° → Cd ≈ 0.3 (traînée de forme minimale)
-     * - 45° → Cd ≈ 0.8 (traînée modérée)
-     * - 90° → Cd ≈ 1.2 (effet parachute complet)
+     * 🔧 CORRECTION : Traînée forte pour effet "pendule" sous le vent
+     * - 0° → Cd ≈ 0.8 (traînée de forme de base)
+     * - 15° → Cd ≈ 0.95 (angle typique de vol)
+     * - 45° → Cd ≈ 1.3 (traînée importante)
+     * - 90° → Cd ≈ 2.0 (effet parachute complet)
+     * 
+     * La traînée tire le cerf-volant "sous le vent" (vers Z+) comme un pendule.
      * 
      * @param alpha - Angle d'attaque en radians
      * @returns Coefficient de traînée Cd (sans unité)
      */
     private getDragCoefficient(alpha: number): number {
-        // Traînée de forme (minimale, présente même à α=0)
+        // Traînée de forme de base (structure + toile)
         const Cd_forme = this.config.referenceDragCoefficient;
         
         // Traînée due à l'angle d'attaque (effet parachute)
+        // 🔧 Coefficient 1.5 (augmenté) pour effet pendule fort
+        // Un cerf-volant doit créer beaucoup de traînée pour se positionner correctement
         // Croît avec sin²(α) : maximale à 90°
-        const Cd_angle = 0.7 * Math.sin(alpha) * Math.sin(alpha);
+        const Cd_angle = 1.5 * Math.sin(alpha) * Math.sin(alpha);
         
         // Traînée induite (due à la portance)
         const Cl = this.getLiftCoefficient(alpha);

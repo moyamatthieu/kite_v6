@@ -39,7 +39,7 @@ function bootstrap() {
         rendering: {
             ...DEFAULT_CONFIG.rendering,
             showGrid: true,
-            showDebug: false,
+            showDebug: true, // ✅ Afficher les vecteurs de forces par défaut
         },
         ui: {
             ...DEFAULT_CONFIG.ui,

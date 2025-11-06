@@ -30,19 +30,30 @@ export interface IForceCalculator {
 }
 
 /**
+ * Force aérodynamique par panneau.
+ */
+export interface PanelForce {
+    /** Force de portance du panneau (N) */
+    lift: Vector3D;
+    
+    /** Force de traînée du panneau (N) */
+    drag: Vector3D;
+}
+
+/**
  * Résultat détaillé d'un calcul aérodynamique (pour debug).
  */
 export interface AerodynamicForceResult {
-    /** Force de portance (N) */
+    /** Force de portance totale (N) */
     lift: Vector3D;
     
-    /** Force de traînée (N) */
+    /** Force de traînée totale (N) */
     drag: Vector3D;
     
     /** Force totale (N) */
     total: Vector3D;
     
-    /** Angle d'attaque (rad) */
+    /** Angle d'attaque moyen (rad) */
     angleOfAttack: number;
     
     /** Vent apparent (m/s) */
@@ -53,6 +64,9 @@ export interface AerodynamicForceResult {
     
     /** Coefficient de traînée effectif */
     dragCoefficient: number;
+    
+    /** Forces par panneau (pour visualisation debug) */
+    panelForces: PanelForce[];
 }
 
 /**
@@ -68,6 +82,14 @@ export interface IAerodynamicForceCalculator extends IForceCalculator {
      * @returns Résultat détaillé
      */
     calculateDetailed(state: KitePhysicsState, wind: WindState, deltaTime: number): AerodynamicForceResult;
+    
+    /**
+     * Calcule le couple aérodynamique dû aux forces réparties sur les panneaux.
+     * @param state - État physique actuel du cerf-volant
+     * @param wind - État du vent
+     * @returns Couple aérodynamique total (N·m)
+     */
+    calculateTorque?(state: KitePhysicsState, wind: WindState): Vector3D;
 }
 
 /**
@@ -127,6 +149,13 @@ export interface IGravityForceCalculator extends IForceCalculator {
      * Accélération gravitationnelle (m/s²).
      */
     readonly gravity: number;
+    
+    /**
+     * Calcule le couple gravitationnel dû à la répartition de masse sur les panneaux.
+     * @param state - État physique actuel du cerf-volant
+     * @returns Couple gravitationnel total (N·m)
+     */
+    calculateTorque?(state: KitePhysicsState): Vector3D;
 }
 
 /**

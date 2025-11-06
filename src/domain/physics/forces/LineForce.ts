@@ -1,6 +1,8 @@
 /**
  * Calculateur de forces des lignes de contrôle.
  * 
+ * Modèle PENDULE 3D : Treuil → Ligne → Point de contrôle → Brides → Structure
+ * 
  * @module domain/physics/forces/LineForce
  */
 
@@ -8,6 +10,7 @@ import * as THREE from 'three';
 import { Vector3D, KitePhysicsState, WindState } from '../../../core/types/PhysicsState';
 import { ILineForceCalculator, LineForceResult } from './ForceCalculator';
 import { Kite } from '../../kite/Kite';
+import { BridleSystem } from '../BridleSystem';
 
 /**
  * Configuration du système de lignes.
@@ -45,6 +48,7 @@ export interface WinchPositions {
 
 /**
  * Calculateur de forces des lignes (modèle bi-régime ressort-amortisseur).
+ * ✅ REFACTORISÉ : Intègre BridleSystem pour chaîne de transmission complète
  * ✅ OPTIMISÉ: Vecteurs temporaires réutilisables pour réduire allocations
  */
 export class LineForceCalculator implements ILineForceCalculator {
@@ -54,9 +58,17 @@ export class LineForceCalculator implements ILineForceCalculator {
     private kite: Kite;
     private winchPositions: WinchPositions;
     
+    // 🎯 NOUVEAUTÉ : Systèmes de brides gauche/droit
+    private leftBridleSystem: BridleSystem;
+    private rightBridleSystem: BridleSystem;
+    
     // Tensions lissées pour éviter oscillations
     private smoothedLeftTension: number;
     private smoothedRightTension: number;
+    
+    // 🎯 NOUVEAUTÉ : Cache des positions précédentes des points de contrôle (warm start optimisation)
+    private leftControlPointCache?: THREE.Vector3;
+    private rightControlPointCache?: THREE.Vector3;
     
     // ✅ OPTIMISATION: Vecteurs temporaires réutilisables (réduire allocations)
     private tempVector1 = new THREE.Vector3();
@@ -66,7 +78,8 @@ export class LineForceCalculator implements ILineForceCalculator {
     constructor(
         kite: Kite,
         winchPositions: WinchPositions,
-        config?: Partial<LineForceConfig>
+        config?: Partial<LineForceConfig>,
+        bridleConfig?: Partial<import('../BridleSystem').BridleSystemConfig>
     ) {
         this.kite = kite;
         this.winchPositions = winchPositions;
@@ -82,6 +95,18 @@ export class LineForceCalculator implements ILineForceCalculator {
         
         this.smoothedLeftTension = this.config.minTension;
         this.smoothedRightTension = this.config.minTension;
+        
+        // 🎯 NOUVEAUTÉ : Initialiser les systèmes de brides avec config dédiée
+        const defaultBridleConfig = {
+            maxIterations: bridleConfig?.maxIterations ?? 20,
+            convergenceTolerance: bridleConfig?.convergenceTolerance ?? 0.001,  // 1mm
+            relaxationFactor: bridleConfig?.relaxationFactor ?? 0.8,
+            controlPointMass: bridleConfig?.controlPointMass ?? 0.01,  // 10g
+            lineConstraintWeight: bridleConfig?.lineConstraintWeight ?? 1.0,
+        };
+        
+        this.leftBridleSystem = new BridleSystem(kite, 'left', defaultBridleConfig);
+        this.rightBridleSystem = new BridleSystem(kite, 'right', defaultBridleConfig);
     }
     
     /**
@@ -95,18 +120,18 @@ export class LineForceCalculator implements ILineForceCalculator {
     
     /**
      * Calcule les forces des lignes avec détails.
+     * 🎯 REFACTORISÉ : Utilise maintenant la chaîne Ligne → Point de contrôle → Brides → Structure
      */
     calculateWithDelta(state: KitePhysicsState, delta: number, baseLength: number): LineForceResult {
         // Longueurs des lignes avec delta
         const leftLength = baseLength - delta;
         const rightLength = baseLength + delta;
         
-        // Points d'attache sur le cerf-volant (points de contrôle des brides)
-    const leftAttach = this.resolveAttachPoint(['CONTROLE_GAUCHE', 'LEFT_CONTROL'], state.position);
-    const rightAttach = this.resolveAttachPoint(['CONTROLE_DROIT', 'RIGHT_CONTROL'], state.position);
+        // 1. Calculer les forces des lignes aux points de contrôle
+        const leftAttach = this.resolveAttachPoint(['CONTROLE_GAUCHE', 'LEFT_CONTROL'], state.position);
+        const rightAttach = this.resolveAttachPoint(['CONTROLE_DROIT', 'RIGHT_CONTROL'], state.position);
         
-        // Calculer forces individuelles
-        const leftForceData = this.calculateSingleLineForce(
+        const leftLineForceData = this.calculateSingleLineForce(
             this.winchPositions.left,
             leftAttach,
             leftLength,
@@ -114,7 +139,7 @@ export class LineForceCalculator implements ILineForceCalculator {
             true
         );
         
-        const rightForceData = this.calculateSingleLineForce(
+        const rightLineForceData = this.calculateSingleLineForce(
             this.winchPositions.right,
             rightAttach,
             rightLength,
@@ -122,27 +147,47 @@ export class LineForceCalculator implements ILineForceCalculator {
             false
         );
         
-        // Force totale
-        const totalForce = leftForceData.force.clone().add(rightForceData.force);
+        // 2. 🎯 NOUVEAUTÉ : Transmettre les forces via les brides à la structure
+        // Passer treuil + longueur ligne + position précédente pour résolution contraintes
+        const leftBridleResult = this.leftBridleSystem.calculateBridleForces(
+            leftLineForceData.force,
+            this.winchPositions.left,
+            leftLength,
+            state,
+            this.leftControlPointCache  // Warm start
+        );
         
-        // Couple (torque) dû à l'asymétrie
-        const centerOfMass = state.position;
-        const leftLeverArm = new THREE.Vector3().subVectors(leftAttach, centerOfMass);
-        const rightLeverArm = new THREE.Vector3().subVectors(rightAttach, centerOfMass);
+        const rightBridleResult = this.rightBridleSystem.calculateBridleForces(
+            rightLineForceData.force,
+            this.winchPositions.right,
+            rightLength,
+            state,
+            this.rightControlPointCache  // Warm start
+        );
         
-        const leftTorque = new THREE.Vector3().crossVectors(leftLeverArm, leftForceData.force);
-        const rightTorque = new THREE.Vector3().crossVectors(rightLeverArm, rightForceData.force);
-        const totalTorque = leftTorque.add(rightTorque);
+        // 3. ✅ Mettre à jour cache des positions pour prochaine frame
+        this.leftControlPointCache = leftBridleResult.controlPointPosition;
+        this.rightControlPointCache = rightBridleResult.controlPointPosition;
+        
+        // 3. Force totale = somme des forces transmises par les brides
+        const totalForce = new THREE.Vector3()
+            .add(leftBridleResult.totalForce)
+            .add(rightBridleResult.totalForce);
+        
+        // 4. Couple total = somme des couples des deux systèmes de brides
+        const totalTorque = new THREE.Vector3()
+            .add(leftBridleResult.torque)
+            .add(rightBridleResult.torque);
         
         return {
             force: totalForce,
             torque: totalTorque,
-            leftForce: leftForceData.force,
-            rightForce: rightForceData.force,
-            leftTension: leftForceData.tension,
-            rightTension: rightForceData.tension,
-            leftDistance: leftForceData.distance,
-            rightDistance: rightForceData.distance,
+            leftForce: leftBridleResult.totalForce,
+            rightForce: rightBridleResult.totalForce,
+            leftTension: leftLineForceData.tension,
+            rightTension: rightLineForceData.tension,
+            leftDistance: leftLineForceData.distance,
+            rightDistance: rightLineForceData.distance,
         };
     }
     
