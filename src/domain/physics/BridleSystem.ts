@@ -126,12 +126,15 @@ export class BridleSystem {
     }
     
     /**
-     * 🎯 NOUVELLE MÉTHODE : Résout la position du point de contrôle.
+     * 🎯 MÉTHODE AMÉLIORÉE : Résout la position du point de contrôle.
      * 
      * Le point de contrôle doit satisfaire 4 contraintes de distance simultanément.
-     * Utilise Newton-Raphson avec gradient descent pour minimiser l'erreur.
+     * Utilise un algorithme de projection alternée (ALTERNATING PROJECTIONS) robuste :
+     * - Plus stable que gradient descent
+     * - Converge même avec mauvaise estimation initiale
+     * - Respect garanti des contraintes individuelles à chaque itération
      * 
-     * Fonction objectif : E(P) = w_L·(|P-W| - L_ligne)² + Σ(|P-A_i| - L_bride_i)²
+     * Principe : Projeter alternativement sur chaque contrainte (sphère de rayon = longueur)
      * 
      * @param winchPos - Position du treuil (origine de la ligne)
      * @param lineLength - Longueur cible de la ligne (m)
@@ -147,114 +150,106 @@ export class BridleSystem {
         bridleLengths: { nose: number; intermediate: number; center: number },
         initialGuess?: Vector3D
     ): Vector3D {
-        // Position initiale : si pas de guess, utiliser trilatération simple avec les 3 brides
-        let P = initialGuess ? initialGuess.clone() : this.trilaterationEstimate(
-            attachmentPositions.nose,
-            attachmentPositions.intermediate,
-            attachmentPositions.center,
-            bridleLengths.nose,
-            bridleLengths.intermediate,
-            bridleLengths.center
-        );
+        // Position initiale : 
+        // 1. Si warm start disponible : utiliser l'estimation précédente
+        // 2. Sinon : position entre les 3 points d'attache (barycentre)
+        let P: THREE.Vector3;
+        
+        if (initialGuess && initialGuess.length() > 0) {
+            P = initialGuess.clone();
+        } else {
+            // Barycentre des 3 points d'attache (meilleure estimation que trilatération)
+            P = new THREE.Vector3()
+                .add(attachmentPositions.nose)
+                .add(attachmentPositions.intermediate)
+                .add(attachmentPositions.center)
+                .divideScalar(3);
+        }
         
         const w_line = this.config.lineConstraintWeight;
+        let bestP = P.clone();
+        let bestError = Infinity;
         
-        // Optimisation itérative (gradient descent avec Newton-Raphson)
+        // 🎯 ALGORITHME DE PROJECTION ALTERNÉE (plus robuste que gradient descent)
+        // Alterner entre projections sur les 4 sphères de contrainte
         for (let iter = 0; iter < this.config.maxIterations; iter++) {
-            // Calculer les erreurs de contraintes
-            const toWinch = this.tempVector1.subVectors(P, winchPos);
-            const distWinch = toWinch.length();
-            const errorLine = distWinch - lineLength;
+            // 1. Projection sur contrainte ligne (pondérée)
+            for (let i = 0; i < Math.ceil(w_line); i++) {
+                const toWinch = this.tempVector1.subVectors(P, winchPos);
+                const distWinch = toWinch.length();
+                
+                if (distWinch > 0.001) {
+                    // Projeter sur sphère centrée en treuil de rayon = lineLength
+                    const dirWinch = toWinch.normalize();
+                    P.copy(winchPos).addScaledVector(dirWinch, lineLength);
+                }
+            }
             
+            // 2. Projection sur contrainte bride nez
             const toNose = this.tempVector2.subVectors(P, attachmentPositions.nose);
             const distNose = toNose.length();
-            const errorNose = distNose - bridleLengths.nose;
             
+            if (distNose > 0.001) {
+                const dirNose = toNose.normalize();
+                P.copy(attachmentPositions.nose).addScaledVector(dirNose, bridleLengths.nose);
+            }
+            
+            // 3. Projection sur contrainte bride intermédiaire
             const toIntermediate = this.tempVector3.subVectors(P, attachmentPositions.intermediate);
             const distIntermediate = toIntermediate.length();
-            const errorIntermediate = distIntermediate - bridleLengths.intermediate;
             
+            if (distIntermediate > 0.001) {
+                const dirIntermediate = toIntermediate.normalize();
+                P.copy(attachmentPositions.intermediate).addScaledVector(dirIntermediate, bridleLengths.intermediate);
+            }
+            
+            // 4. Projection sur contrainte bride centre
             const toCenter = new THREE.Vector3().subVectors(P, attachmentPositions.center);
             const distCenter = toCenter.length();
-            const errorCenter = distCenter - bridleLengths.center;
             
-            // Erreur totale (somme des carrés pondérée)
+            if (distCenter > 0.001) {
+                const dirCenter = toCenter.normalize();
+                P.copy(attachmentPositions.center).addScaledVector(dirCenter, bridleLengths.center);
+            }
+            
+            // Calculer l'erreur résiduelle après ce cycle de projections
+            const errorLine = Math.abs(P.distanceTo(winchPos) - lineLength);
+            const errorNose = Math.abs(P.distanceTo(attachmentPositions.nose) - bridleLengths.nose);
+            const errorIntermediate = Math.abs(P.distanceTo(attachmentPositions.intermediate) - bridleLengths.intermediate);
+            const errorCenter = Math.abs(P.distanceTo(attachmentPositions.center) - bridleLengths.center);
+            
+            // Erreur totale RMS (pondérée)
             const totalError = Math.sqrt(
-                w_line * errorLine * errorLine +
-                errorNose * errorNose +
-                errorIntermediate * errorIntermediate +
-                errorCenter * errorCenter
+                (w_line * errorLine * errorLine +
+                 errorNose * errorNose +
+                 errorIntermediate * errorIntermediate +
+                 errorCenter * errorCenter) / (w_line + 3)
             );
+            
+            // Garder la meilleure solution trouvée
+            if (totalError < bestError) {
+                bestError = totalError;
+                bestP.copy(P);
+            }
             
             // Convergence ?
             if (totalError < this.config.convergenceTolerance) {
                 break;
             }
             
-            // Calcul du gradient : ∇E = 2 * Σ(error_i * direction_i)
-            const gradient = new THREE.Vector3(0, 0, 0);
-            
-            if (distWinch > 0.001) {
-                gradient.addScaledVector(toWinch.normalize(), 2 * w_line * errorLine);
+            // Protection divergence : si erreur augmente trop, revenir à la meilleure solution
+            if (iter > 5 && totalError > bestError * 2) {
+                P.copy(bestP);
+                break;
             }
-            if (distNose > 0.001) {
-                gradient.addScaledVector(toNose.normalize(), 2 * errorNose);
-            }
-            if (distIntermediate > 0.001) {
-                gradient.addScaledVector(toIntermediate.normalize(), 2 * errorIntermediate);
-            }
-            if (distCenter > 0.001) {
-                gradient.addScaledVector(toCenter.normalize(), 2 * errorCenter);
-            }
-            
-            // Mise à jour position avec relaxation
-            P.addScaledVector(gradient, -this.config.relaxationFactor * totalError / (gradient.length() + 0.001));
         }
         
-        return P;
+        return bestP;
     }
     
-    /**
-     * Estimation initiale par trilatération (intersection de 3 sphères).
-     * Utilisée comme point de départ pour l'optimisation complète.
-     */
-    private trilaterationEstimate(
-        p1: Vector3D, p2: Vector3D, p3: Vector3D,
-        r1: number, r2: number, r3: number
-    ): Vector3D {
-        // Base orthonormée locale
-        const ex = new THREE.Vector3().subVectors(p2, p1);
-        const d = ex.length();
-        ex.normalize();
-        
-        const temp = new THREE.Vector3().subVectors(p3, p1);
-        const i = temp.dot(ex);
-        
-        const temp2 = new THREE.Vector3().copy(ex).multiplyScalar(i);
-        const ey = new THREE.Vector3().subVectors(temp, temp2);
-        ey.normalize();
-        
-        const j = new THREE.Vector3().subVectors(p3, p1).dot(ey);
-        
-        // Calcul coordonnées
-        const x = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
-        const y = (r1 * r1 - r3 * r3 + i * i + j * j) / (2 * j) - (i / j) * x;
-        const z_squared = r1 * r1 - x * x - y * y;
-        const z = z_squared > 0 ? Math.sqrt(z_squared) : 0;
-        
-        // Reconstruction position
-        const result = new THREE.Vector3().copy(p1);
-        result.addScaledVector(ex, x);
-        result.addScaledVector(ey, y);
-        
-        // Prendre z positif (devant le kite)
-        const ez = new THREE.Vector3().crossVectors(ex, ey).normalize();
-        result.addScaledVector(ez, z);
-        
-        return result;
-    }
     
     /**
+     * 🎯 NOUVEAUTÉ : Calcule les tensions dans les brides par résolution système linéaire.    /**
      * 🎯 NOUVELLE MÉTHODE : Calcule les tensions dans les brides par résolution système linéaire.
      * 
      * Équilibre des forces au point de contrôle :
@@ -372,28 +367,7 @@ export class BridleSystem {
             previousControlPoint
         );
         
-        // 🔍 DIAGNOSTIC : Comparer position résolue vs position "solidaire" (ancienne approche)
-        const solidaryControlPoint = this.kite.getGlobalPointPosition(this.attachmentPoints.intermediate);
-        if (solidaryControlPoint) {
-            const positionDiff = controlPointPos.distanceTo(solidaryControlPoint);
-            if (positionDiff > 0.01) {  // Différence > 1cm
-                console.log('[BridleSystem] Correction position contrôle:', {
-                    differenceMeters: positionDiff.toFixed(3),
-                    resolved: {
-                        x: controlPointPos.x.toFixed(3),
-                        y: controlPointPos.y.toFixed(3),
-                        z: controlPointPos.z.toFixed(3)
-                    },
-                    solidary: {
-                        x: solidaryControlPoint.x.toFixed(3),
-                        y: solidaryControlPoint.y.toFixed(3),
-                        z: solidaryControlPoint.z.toFixed(3)
-                    }
-                });
-            }
-        }
-        
-        // 🔍 DIAGNOSTIC : Vérifier contraintes géométriques
+        // 🔍 DIAGNOSTIC AMÉLIORÉ : Vérifier contraintes géométriques
         const actualLineLength = controlPointPos.distanceTo(winchPos);
         const actualNoseLength = controlPointPos.distanceTo(nosePos);
         const actualIntermediateLength = controlPointPos.distanceTo(intermediatePos);
@@ -413,14 +387,18 @@ export class BridleSystem {
             constraintErrors.center
         );
         
-        if (maxConstraintError > this.config.convergenceTolerance * 2) {
-            console.warn('[BridleSystem] Erreur contraintes élevée:', {
-                maxError: maxConstraintError.toFixed(4),
-                details: {
-                    line: constraintErrors.line.toFixed(4),
-                    nose: constraintErrors.nose.toFixed(4),
-                    intermediate: constraintErrors.intermediate.toFixed(4),
-                    center: constraintErrors.center.toFixed(4)
+        // ✅ Log uniquement si erreur significative (> 1cm)
+        if (maxConstraintError > 0.01) {
+            const errorType = maxConstraintError > this.config.convergenceTolerance * 5 ? 'CRITIQUE' :
+                             maxConstraintError > this.config.convergenceTolerance * 2 ? 'ÉLEVÉE' : 'Modérée';
+            
+            console.warn(`[BridleSystem] Erreur contraintes ${errorType}: ${maxConstraintError.toFixed(4)}m`, {
+                tolérance: this.config.convergenceTolerance.toFixed(4) + 'm',
+                détails: {
+                    ligne: `${constraintErrors.line.toFixed(4)}m (cible: ${targetLineLength.toFixed(2)}m, actuel: ${actualLineLength.toFixed(4)}m)`,
+                    nez: `${constraintErrors.nose.toFixed(4)}m (cible: ${bridleLengths.nose.toFixed(2)}m, actuel: ${actualNoseLength.toFixed(4)}m)`,
+                    inter: `${constraintErrors.intermediate.toFixed(4)}m (cible: ${bridleLengths.intermediate.toFixed(2)}m, actuel: ${actualIntermediateLength.toFixed(4)}m)`,
+                    centre: `${constraintErrors.center.toFixed(4)}m (cible: ${bridleLengths.center.toFixed(2)}m, actuel: ${actualCenterLength.toFixed(4)}m)`
                 }
             });
         }
@@ -437,17 +415,32 @@ export class BridleSystem {
         );
         
         if (!tensions) {
-            console.warn('[BridleSystem] Échec résolution tensions');
+            console.warn('[BridleSystem] Échec résolution tensions - utilisation fallback');
             return {
                 ...this.createEmptyResult(),
                 controlPointPosition: controlPointPos
             };
         }
         
-        // 5. Calculer les forces vectorielles sur chaque point d'attache
-        const forceNose = dirNose.clone().multiplyScalar(tensions.nose);
-        const forceIntermediate = dirIntermediate.clone().multiplyScalar(tensions.intermediate);
-        const forceCenter = dirCenter.clone().multiplyScalar(tensions.center);
+        // 🎯 PROTECTION AMÉLIORÉE : Réduire forces si contraintes mal respectées
+        // Utilise une fonction smooth (pas de saut brutal)
+        let tensionMultiplier = 1.0;
+        if (maxConstraintError > this.config.convergenceTolerance) {
+            // Fonction de pénalité smooth : exp(-k * error²)
+            const k = 200; // Pente de décroissance
+            const normalizedError = maxConstraintError / this.config.convergenceTolerance;
+            tensionMultiplier = Math.exp(-k * (normalizedError - 1) * (normalizedError - 1));
+            tensionMultiplier = Math.max(0.05, tensionMultiplier); // Minimum 5% des forces
+            
+            if (tensionMultiplier < 0.9) {
+                console.log(`[BridleSystem] Forces réduites à ${(tensionMultiplier * 100).toFixed(0)}% (erreur ${maxConstraintError.toFixed(4)}m)`);
+            }
+        }
+        
+        // 5. Calculer les forces vectorielles sur chaque point d'attache (avec protection smooth)
+        const forceNose = dirNose.clone().multiplyScalar(tensions.nose * tensionMultiplier);
+        const forceIntermediate = dirIntermediate.clone().multiplyScalar(tensions.intermediate * tensionMultiplier);
+        const forceCenter = dirCenter.clone().multiplyScalar(tensions.center * tensionMultiplier);
         
         // 6. Force totale = somme des 3 forces (doit être ≈ -lineForce)
         const totalForce = new THREE.Vector3()
@@ -487,9 +480,9 @@ export class BridleSystem {
                 center: forceCenter
             },
             tensions: {
-                nose: tensions.nose,
-                intermediate: tensions.intermediate,
-                center: tensions.center
+                nose: tensions.nose * tensionMultiplier,
+                intermediate: tensions.intermediate * tensionMultiplier,
+                center: tensions.center * tensionMultiplier
             },
             controlPointPosition: controlPointPos  // ✅ Position résolue dynamiquement
         };

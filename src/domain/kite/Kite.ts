@@ -95,6 +95,38 @@ export class Kite {
     }
     
     /**
+     * 🎯 NOUVEAUTÉ : Met à jour la position locale d'un point de contrôle contraint.
+     * 
+     * Cette méthode permet de corriger les positions des points de contrôle
+     * pour respecter les contraintes géométriques (lignes + brides).
+     * 
+     * PRINCIPE : Position globale contrainte → Position locale dans géométrie
+     * 1. Transformer position globale contrainte vers repère local du kite
+     * 2. Mettre à jour la géométrie avec cette nouvelle position locale
+     * 
+     * @param pointName - Nom du point à mettre à jour ('CONTROLE_GAUCHE', 'CONTROLE_DROIT')
+     * @param globalPosition - Nouvelle position globale contrainte
+     * @returns true si mise à jour réussie, false si point inexistant
+     */
+    updateControlPointPosition(pointName: string, globalPosition: THREE.Vector3): boolean {
+        // Vérifier que le point existe dans la géométrie
+        if (!this.geometry.getPoint(pointName)) {
+            console.warn(`[Kite] Point ${pointName} inexistant, impossible de mettre à jour`);
+            return false;
+        }
+        
+        // Transformer position globale → locale (inverse de getGlobalPointPosition)
+        // 1) Translation inverse : soustraire position du kite
+        // 2) Rotation inverse : appliquer quaternion conjugué (inverse)
+        const localPosition = globalPosition.clone()
+            .sub(this.state.position)                          // 1) Translation inverse
+            .applyQuaternion(this.state.orientation.clone().invert()); // 2) Rotation inverse
+        
+        // Mettre à jour la géométrie avec la nouvelle position locale
+        return this.geometry.updatePoint(pointName, localPosition);
+    }
+    
+    /**
      * Calcule la position globale du centroïde d'un panneau.
      */
     getGlobalPanelCentroid(panelIndex: number): THREE.Vector3 {

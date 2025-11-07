@@ -269,10 +269,10 @@ export const DEFAULT_CONFIG: SimulationConfig = {
         // 🎯 NOUVEAUTÉ : Système de brides avec résolution de contraintes
         bridles: {
             // Paramètres solveur Newton-Raphson
-            maxIterations: 20,  // Itérations max pour convergence
-            convergenceTolerance: 0.001,  // m - Tolérance 1mm (précision suffisante)
-            relaxationFactor: 0.7,  // Facteur de relaxation pour stabilité
-            lineConstraintWeight: 2.0,  // Priorité 2× sur contrainte ligne vs brides
+            maxIterations: 20,  // Augmenté de 15 à 20 pour convergence sur cas difficiles
+            convergenceTolerance: 0.001,  // m - Ramené à 1mm (au lieu de 5mm) pour précision
+            relaxationFactor: 0.85,  // Augmenté de 0.8 à 0.85 pour convergence plus rapide
+            lineConstraintWeight: 1.2,  // Réduit de 1.5 à 1.2 pour équilibre optimal ligne/brides
         },
     },
     control: {

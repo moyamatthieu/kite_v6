@@ -139,6 +139,14 @@ export interface ILineForceCalculator extends IForceCalculator {
      * Réinitialise les tensions lissées (appelé lors d'un reset).
      */
     reset(): void;
+    
+    /**
+     * 🎯 NOUVEAUTÉ : Retourne les positions contraintes résolues des points de contrôle.
+     * Ces positions respectent les contraintes géométriques (lignes + brides).
+     * 
+     * @returns Positions des points de contrôle gauche et droit
+     */
+    getResolvedControlPoints?(): { left?: THREE.Vector3; right?: THREE.Vector3 };
 }
 
 /**

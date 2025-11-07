@@ -363,6 +363,26 @@ export class KiteGeometry {
     }
     
     /**
+     * 🎯 NOUVEAUTÉ : Met à jour la position d'un point existant.
+     * 
+     * Utilisé pour corriger dynamiquement les positions des points de contrôle
+     * afin de respecter les contraintes géométriques des lignes et brides.
+     * 
+     * @param name - Nom du point à mettre à jour
+     * @param newPosition - Nouvelle position locale
+     * @returns true si mise à jour réussie, false si point inexistant
+     */
+    updatePoint(name: string, newPosition: Vector3D): boolean {
+        if (!this.points.has(name)) {
+            return false;
+        }
+        
+        // Mettre à jour la position (clone pour éviter référence externe)
+        this.points.set(name, newPosition.clone());
+        return true;
+    }
+    
+    /**
      * Retourne tous les points nommés.
      */
     getAllPoints(): NamedPoint[] {

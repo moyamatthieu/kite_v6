@@ -120,20 +120,59 @@ export class LineForceCalculator implements ILineForceCalculator {
     
     /**
      * Calcule les forces des lignes avec détails.
-     * 🎯 REFACTORISÉ : Utilise maintenant la chaîne Ligne → Point de contrôle → Brides → Structure
+     * 🎯 REFACTORISÉ (6 nov 2025) : Utilise maintenant la chaîne Ligne → Point de contrôle → Brides → Structure
+     * ✅ CORRECTION CRITIQUE (7 nov 2025) : Supprime le délai d'1 frame en résolvant la position AVANT de calculer la force.
+     * 
+     * PRINCIPE : Approche en 3 passes pour éliminer l'instabilité numérique
+     * 1. Résoudre la position géométrique actuelle (avec force dummy)
+     * 2. Calculer la vraie tension du ressort avec cette position actuelle
+     * 3. Distribuer la force réelle sur les brides pour obtenir couple et forces finales
      */
     calculateWithDelta(state: KitePhysicsState, delta: number, baseLength: number): LineForceResult {
         // Longueurs des lignes avec delta
         const leftLength = baseLength - delta;
         const rightLength = baseLength + delta;
         
-        // 1. Calculer les forces des lignes aux points de contrôle
-        const leftAttach = this.resolveAttachPoint(['CONTROLE_GAUCHE', 'LEFT_CONTROL'], state.position);
-        const rightAttach = this.resolveAttachPoint(['CONTROLE_DROIT', 'RIGHT_CONTROL'], state.position);
+        // ═══════════════════════════════════════════════════════════════════════════
+        // CORRECTION CRITIQUE : Résolution en 3 passes pour supprimer le délai d'1 frame
+        // ═══════════════════════════════════════════════════════════════════════════
+        
+        // === PASSE 1 : RÉSOUDRE LA POSITION GÉOMÉTRIQUE ACTUELLE ===
+        // Nous appelons le solveur avec une force factice (0,0,0) juste pour 
+        // obtenir la position géométrique résolue du point de contrôle pour CETTE frame.
+        // Cela évite d'utiliser la position de la frame précédente qui cause l'instabilité.
+        
+        const dummyForce = this.tempVector3.set(0, 0, 0); // Force nulle pour résolution pure
+        
+        const leftResolvedState = this.leftBridleSystem.calculateBridleForces(
+            dummyForce,
+            this.winchPositions.left,
+            leftLength,
+            state,
+            this.leftControlPointCache  // Warm start avec position précédente
+        );
+        const leftControlPoint_CURRENT = leftResolvedState.controlPointPosition;
+        
+        const rightResolvedState = this.rightBridleSystem.calculateBridleForces(
+            dummyForce,
+            this.winchPositions.right,
+            rightLength,
+            state,
+            this.rightControlPointCache // Warm start avec position précédente
+        );
+        const rightControlPoint_CURRENT = rightResolvedState.controlPointPosition;
+        
+        // Mettre à jour le cache immédiatement pour le warm start de la prochaine frame
+        this.leftControlPointCache = leftControlPoint_CURRENT.clone();
+        this.rightControlPointCache = rightControlPoint_CURRENT.clone();
+        
+        // === PASSE 2 : CALCULER LA VRAIE TENSION AVEC LA POSITION ACTUELLE ===
+        // Maintenant, nous calculons la force de ressort (le "pull") en utilisant 
+        // la position que nous venons de résoudre. Plus de délai = pas d'instabilité.
         
         const leftLineForceData = this.calculateSingleLineForce(
             this.winchPositions.left,
-            leftAttach,
+            leftControlPoint_CURRENT, // ✅ Utilise la position résolue de CETTE frame
             leftLength,
             state,
             true
@@ -141,40 +180,43 @@ export class LineForceCalculator implements ILineForceCalculator {
         
         const rightLineForceData = this.calculateSingleLineForce(
             this.winchPositions.right,
-            rightAttach,
+            rightControlPoint_CURRENT, // ✅ Utilise la position résolue de CETTE frame
             rightLength,
             state,
             false
         );
         
-        // 2. 🎯 NOUVEAUTÉ : Transmettre les forces via les brides à la structure
-        // Passer treuil + longueur ligne + position précédente pour résolution contraintes
+        // === PASSE 3 : DISTRIBUER LA VRAIE FORCE (POUR COUPLE ET FORCES FINALES) ===
+        // On rappelle le solveur avec la force réelle pour obtenir la 
+        // distribution de force correcte sur les brides et le couple résultant.
+        // C'est rapide car la position a déjà été résolue (warm start efficace).
+        
         const leftBridleResult = this.leftBridleSystem.calculateBridleForces(
-            leftLineForceData.force,
+            leftLineForceData.force, // ✅ Utilise la VRAIE force calculée avec position actuelle
             this.winchPositions.left,
             leftLength,
             state,
-            this.leftControlPointCache  // Warm start
+            this.leftControlPointCache
         );
         
         const rightBridleResult = this.rightBridleSystem.calculateBridleForces(
-            rightLineForceData.force,
+            rightLineForceData.force, // ✅ Utilise la VRAIE force calculée avec position actuelle
             this.winchPositions.right,
             rightLength,
             state,
-            this.rightControlPointCache  // Warm start
+            this.rightControlPointCache
         );
         
-        // 3. ✅ Mettre à jour cache des positions pour prochaine frame
-        this.leftControlPointCache = leftBridleResult.controlPointPosition;
-        this.rightControlPointCache = rightBridleResult.controlPointPosition;
+        // ═══════════════════════════════════════════════════════════════════════════
+        // FIN DE LA CORRECTION - Forces et couple maintenant cohérents avec position actuelle
+        // ═══════════════════════════════════════════════════════════════════════════
         
-        // 3. Force totale = somme des forces transmises par les brides
+        // Force totale = somme des forces transmises par les brides
         const totalForce = new THREE.Vector3()
             .add(leftBridleResult.totalForce)
             .add(rightBridleResult.totalForce);
         
-        // 4. Couple total = somme des couples des deux systèmes de brides
+        // Couple total = somme des couples des deux systèmes de brides
         const totalTorque = new THREE.Vector3()
             .add(leftBridleResult.torque)
             .add(rightBridleResult.torque);
@@ -309,6 +351,11 @@ export class LineForceCalculator implements ILineForceCalculator {
         // ✅ CORRECTION: Réinitialiser à 0 (pas de tension artificielle au démarrage)
         this.smoothedLeftTension = 0;
         this.smoothedRightTension = 0;
+        
+        // ✅ CORRECTION: Réinitialiser aussi le cache des positions contraintes
+        // Pour forcer un recalcul complet à la prochaine frame
+        this.leftControlPointCache = undefined;
+        this.rightControlPointCache = undefined;
     }
     
     /**
@@ -317,9 +364,21 @@ export class LineForceCalculator implements ILineForceCalculator {
     setWinchPositions(positions: WinchPositions): void {
         this.winchPositions = positions;
     }
+    
+    /**
+     * 🎯 NOUVEAUTÉ : Retourne les positions contraintes résolues des points de contrôle.
+     * Utilisé par le moteur physique pour mettre à jour la géométrie après calcul des forces.
+     */
+    getResolvedControlPoints(): { left?: THREE.Vector3; right?: THREE.Vector3 } {
+        return {
+            left: this.leftControlPointCache?.clone(),
+            right: this.rightControlPointCache?.clone()
+        };
+    }
 
     /**
      * Résout la position d'attache d'une ligne en testant plusieurs alias.
+     * ✅ CORRECTION : Utilise une position de fallback géométriquement cohérente
      */
     private resolveAttachPoint(names: string[], fallback: Vector3D): Vector3D {
         for (const name of names) {
@@ -329,6 +388,14 @@ export class LineForceCalculator implements ILineForceCalculator {
             }
         }
 
-        return fallback.clone();
+        // 🎯 CORRECTION : Au lieu d'utiliser le centre de masse comme fallback,
+        // estimer une position géométriquement cohérente pour un point de contrôle
+        // Utiliser une position légèrement en avant du centre de masse (typique d'un point de contrôle)
+        const estimatedControlPoint = fallback.clone();
+        estimatedControlPoint.z += 0.5; // 50cm vers l'avant (Z+)
+        estimatedControlPoint.y -= 0.2; // 20cm vers le bas (position typique brides)
+        
+        console.warn('[LineForce] Points de contrôle non trouvés, utilisation estimation géométrique');
+        return estimatedControlPoint;
     }
 }
