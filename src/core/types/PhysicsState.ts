@@ -115,6 +115,12 @@ export interface LinesState {
     
     /** Tension totale (N) */
     totalTension: number;
+    
+    /** 🆕 Distance réelle treuil gauche → point de contrôle gauche (m) */
+    leftDistance: number;
+    
+    /** 🆕 Distance réelle treuil droit → point de contrôle droit (m) */
+    rightDistance: number;
 }
 
 /**

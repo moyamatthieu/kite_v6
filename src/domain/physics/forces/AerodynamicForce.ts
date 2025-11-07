@@ -152,6 +152,9 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
             };
         }
         
+        // DEBUG: Log vent apparent
+        console.log(`[AERO DEBUG] Vent apparent: ${windSpeed.toFixed(2)} m/s, Direction: (${this.tempVector1.x.toFixed(2)}, ${this.tempVector1.y.toFixed(2)}, ${this.tempVector1.z.toFixed(2)})`);
+        
         // Direction du vent (réutilise tempVector2)
         this.tempVector2.copy(this.tempVector1).normalize();
         
@@ -192,6 +195,12 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         
         // Angle d'attaque moyen pondéré par surface
         const avgAlpha = totalArea > 0 ? weightedAlpha / totalArea : 0;
+        
+        // DEBUG: Log surface totale et résultats
+        console.log(`[AERO DEBUG] Surface totale: ${totalArea.toFixed(3)} m², Nombre panneaux: ${panelCount}`);
+        console.log(`[AERO DEBUG] Force totale: (${totalForce.x.toFixed(2)}, ${totalForce.y.toFixed(2)}, ${totalForce.z.toFixed(2)}) N, Magnitude: ${totalForce.length().toFixed(2)} N`);
+        console.log(`[AERO DEBUG] Portance: ${totalLift.length().toFixed(2)} N, Traînée: ${totalDrag.length().toFixed(2)} N`);
+        console.log(`[AERO DEBUG] Angle d'attaque moyen: ${(avgAlpha * 180 / Math.PI).toFixed(1)}°`);
         
         return {
             lift: totalLift,
@@ -265,7 +274,7 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
      * 🔧 PHYSIQUE CORRECTE PAR PANNEAU :
      * Chaque panneau est traité comme une surface aérodynamique indépendante qui génère :
      * - PORTANCE : Perpendiculaire au vent apparent, proportionnelle à la surface projetée
-     * - TRAÎNÉE : Parallèle au vent apparent (opposée au mouvement relatif)
+     * - TRAÎNÉE : S'oppose au vent apparent
      * 
      * Les forces dépendent de :
      * - Surface du panneau (S)
@@ -287,14 +296,28 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         const panelNormal = this.kite.getGlobalPanelNormal(panelIndex);
         const panelArea = this.kite.getPanelArea(panelIndex);
 
-        // 🔧 Angle d'attaque LOCAL du panneau
-        // α = angle entre normale du panneau et direction du vent
+        // ═══════════════════════════════════════════════════════════════════════════
+        // ANGLE D'ATTAQUE ET ORIENTATION DU PANNEAU
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Le produit scalaire normale·vent indique quelle face reçoit le vent :
+        // - normalWindComponent > 0 : Vent frappe l'INTRADOS (face avant) → OK
+        // - normalWindComponent < 0 : Vent frappe l'EXTRADOS (face arrière) → Panneau à l'envers !
+        // 
+        // ⚠️ CRITIQUE : Si panneau à l'envers, la portance s'inverse et peut causer explosion
+        // Solution : Réduire drastiquement portance si panneau mal orienté
+        // ═══════════════════════════════════════════════════════════════════════════
+        
         const normalWindComponent = panelNormal.dot(windDirection);
+        
+        // Facteur d'orientation : 1.0 si face au vent, décroît vers 0 si à l'envers
+        const orientationFactor = Math.max(0, normalWindComponent);
+        
+        // Angle d'attaque (toujours positif par définition géométrique)
         const alpha = Math.asin(Math.min(1, Math.abs(normalWindComponent)));
         
         // 🔧 Coefficients aérodynamiques spécifiques à cet angle
-        const Cl = this.getLiftCoefficient(alpha);
-        const Cd = this.getDragCoefficient(alpha);
+        const Cl = this.getLiftCoefficient(alpha) * orientationFactor; // ✅ Portance réduite si mal orienté
+        const Cd = this.getDragCoefficient(alpha); // Traînée toujours présente
         
         // 🔧 Pression dynamique : q = 0.5 × ρ × v²
         const dynamicPressure = 0.5 * this.config.airDensity * windSpeed * windSpeed;
@@ -307,14 +330,12 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         // DIRECTION DES FORCES
         // ═══════════════════════════════════════════════════════════════════════════
         
-        // 🔧 TRAÎNÉE : Pousse l'objet DANS LE SENS du flux de vent relatif
-        // La traînée s'oppose au mouvement relatif, donc pousse l'objet avec le flux
+        // 🔧 TRAÎNÉE : Dans la direction du vent apparent
+        // La traînée pousse l'objet dans le sens du flux d'air relatif
         // apparentWind = wind.velocity - kite.velocity (vent vu depuis le kite)
         // windDirection = normalize(apparentWind) = direction du flux relatif
-        // La force pousse DANS cette direction (pas de signe moins !)
-        const drag = windDirection.clone().multiplyScalar(dragMagnitude);
-
-        // 🔧 PORTANCE : Perpendiculaire au vent apparent
+        // La force de traînée pousse le kite dans cette direction
+        const drag = windDirection.clone().multiplyScalar(dragMagnitude);        // 🔧 PORTANCE : Perpendiculaire au vent apparent
         // Calculée par DOUBLE PRODUIT VECTORIEL pour garantir :
         // - Perpendiculaire au vent
         // - Dans le plan du panneau
@@ -338,6 +359,17 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         const liftDirection = new THREE.Vector3().crossVectors(windDirection, this.tempVector3).normalize();
         
         const lift = liftDirection.multiplyScalar(liftMagnitude);
+        
+        // ✅ GARDE-FOU : Clamper les forces pour éviter explosion numérique
+        // Si vent très fort ou vitesse anormale → saturer les forces
+        const MAX_PANEL_FORCE = 200; // N - Force max par panneau (surface ~0.14 m²)
+        
+        if (lift.length() > MAX_PANEL_FORCE) {
+            lift.normalize().multiplyScalar(MAX_PANEL_FORCE);
+        }
+        if (drag.length() > MAX_PANEL_FORCE) {
+            drag.normalize().multiplyScalar(MAX_PANEL_FORCE);
+        }
         
         return { lift, drag };
     }
@@ -400,10 +432,11 @@ export class AerodynamicForceCalculator implements IAerodynamicForceCalculator {
         const Cd_forme = this.config.referenceDragCoefficient;
         
         // Traînée due à l'angle d'attaque (effet parachute)
-        // 🔧 Coefficient 1.5 (augmenté) pour effet pendule fort
-        // Un cerf-volant doit créer beaucoup de traînée pour se positionner correctement
+        // 🔧 Coefficient 0.5 (corrigé de 1.5) pour forces réalistes
+        // α=15° → Cd_angle ≈ 0.03, total Cd ≈ 1.58 (au lieu de 3.5)
+        // Cerf-volant génère traînée modérée pour effet "pendule" sans explosion de forces
         // Croît avec sin²(α) : maximale à 90°
-        const Cd_angle = 1.5 * Math.sin(alpha) * Math.sin(alpha);
+        const Cd_angle = 0.5 * Math.sin(alpha) * Math.sin(alpha);
         
         // Traînée induite (due à la portance)
         const Cl = this.getLiftCoefficient(alpha);

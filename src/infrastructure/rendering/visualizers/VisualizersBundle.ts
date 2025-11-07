@@ -910,6 +910,105 @@ export class PanelNormalsVisualizer {
 }
 
 /**
+ * Visualiseur du vent apparent sur chaque panneau.
+ * Affiche une flèche verte montrant la direction et l'intensité du vent apparent
+ * vu par chaque surface du cerf-volant.
+ */
+export class ApparentWindVisualizer {
+    private group: THREE.Group;
+    private arrows: THREE.ArrowHelper[] = [];
+    
+    constructor() {
+        this.group = new THREE.Group();
+        this.group.visible = false; // Invisible par défaut
+    }
+    
+    /**
+     * Met à jour les vecteurs de vent apparent pour chaque panneau.
+     * 
+     * @param kite - Le cerf-volant
+     * @param state - État physique du cerf-volant
+     * @param windState - État du vent global
+     */
+    update(
+        kite: Kite,
+        state: KitePhysicsState,
+        windState: WindState
+    ): void {
+        const panelCount = kite.geometry.getPanelCount();
+        
+        // Synchroniser la position et l'orientation du groupe avec le kite
+        this.group.position.copy(state.position);
+        this.group.quaternion.copy(state.orientation);
+        
+        // Créer ou mettre à jour les flèches de vent apparent
+        for (let i = 0; i < panelCount; i++) {
+            // Calculer le centroïde en coordonnées locales
+            const localCentroid = kite.geometry.getPanelCentroid(i);
+            
+            // Calculer le vent apparent en coordonnées locales
+            // Vent apparent = Vent global - Vitesse du kite (en coordonnées locales)
+            const velocityLocal = state.velocity.clone().applyQuaternion(state.orientation.clone().invert());
+            const windVelocityLocal = windState.velocity.clone().applyQuaternion(state.orientation.clone().invert());
+            const apparentWindLocal = windVelocityLocal.clone().sub(velocityLocal);
+            
+            const apparentWindSpeed = apparentWindLocal.length();
+            
+            // Créer ou réutiliser la flèche
+            if (i >= this.arrows.length) {
+                // Créer une nouvelle flèche
+                // Couleur vert citron pour le vent apparent
+                const arrow = new THREE.ArrowHelper(
+                    apparentWindLocal.normalize(),
+                    localCentroid,
+                    apparentWindSpeed * 0.2, // Échelle: 1 m/s = 20cm
+                    0x88ff00, // Vert citron
+                    0.15, // Longueur de la tête
+                    0.1  // Largeur de la tête
+                );
+                this.arrows.push(arrow);
+                this.group.add(arrow);
+            } else {
+                // Mettre à jour la flèche existante
+                const arrow = this.arrows[i];
+                arrow.position.copy(localCentroid);
+                
+                if (apparentWindSpeed > 0.1) {
+                    arrow.setDirection(apparentWindLocal.normalize());
+                    arrow.setLength(apparentWindSpeed * 0.2, 0.15, 0.1);
+                    arrow.visible = true;
+                } else {
+                    // Masquer si le vent apparent est trop faible
+                    arrow.visible = false;
+                }
+            }
+        }
+        
+        // Supprimer les flèches en trop
+        while (this.arrows.length > panelCount) {
+            const arrow = this.arrows.pop()!;
+            this.group.remove(arrow);
+            arrow.dispose();
+        }
+    }
+    
+    getObject3D(): THREE.Group {
+        return this.group;
+    }
+    
+    setVisible(visible: boolean): void {
+        this.group.visible = visible;
+    }
+    
+    dispose(): void {
+        this.arrows.forEach(arrow => {
+            arrow.dispose();
+        });
+        this.arrows = [];
+    }
+}
+
+/**
  * Visualiseur de labels pour les points structurels du cerf-volant.
  * ✅ OPTIMISÉ: Réutilise les sprites existants au lieu de les recréer à chaque frame
  */

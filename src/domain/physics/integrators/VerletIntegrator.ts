@@ -42,7 +42,16 @@ export class VerletIntegrator implements IIntegrator {
         deltaTime: number,
         mass: number
     ): KitePhysicsState {
-        const newState = { ...state };
+        // ⚠️ CRITIQUE : Copie PROFONDE pour éviter mutations de l'état d'entrée
+        const newState: KitePhysicsState = {
+            ...state,
+            position: state.position.clone(),
+            velocity: state.velocity.clone(),
+            acceleration: state.acceleration.clone(),
+            orientation: state.orientation.clone(),
+            angularVelocity: state.angularVelocity.clone(),
+            angularAcceleration: state.angularAcceleration.clone()
+        };
         
         // 1. Calculer accélération linéaire : a = F / m
         const acceleration = force.clone().divideScalar(mass);

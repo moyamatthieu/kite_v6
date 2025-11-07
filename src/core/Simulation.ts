@@ -17,6 +17,7 @@ import { ForceManager } from '../domain/physics/forces/ForceCalculator';
 import { AerodynamicForceCalculator } from '../domain/physics/forces/AerodynamicForce';
 import { GravityForceCalculator } from '../domain/physics/forces/GravityForce';
 import { LineForceCalculator } from '../domain/physics/forces/LineForce';
+import { LineForceSimplified } from '../domain/physics/forces/LineForceSimplified';
 
 // Infrastructure
 import { Renderer } from '../infrastructure/rendering/Renderer';
@@ -31,7 +32,8 @@ import {
     ControlStationVisualizer,
     GeometryLabelsVisualizer,
     PanelNumbersVisualizer,
-    PanelNormalsVisualizer
+    PanelNormalsVisualizer,
+    ApparentWindVisualizer
 } from '../infrastructure/rendering/visualizers/VisualizersBundle';
 
 // Application
@@ -76,6 +78,7 @@ export class NewSimulation {
     private geometryLabelsVisualizer: GeometryLabelsVisualizer;
     private panelNumbersVisualizer: PanelNumbersVisualizer;
     private panelNormalsVisualizer: PanelNormalsVisualizer;
+    private apparentWindVisualizer: ApparentWindVisualizer;
     
     // Contrôle
     private currentDelta = 0;
@@ -131,7 +134,9 @@ export class NewSimulation {
         
         // 3. Initialiser domaine
         const initialState = createInitialState();
-        initialState.position.set(0, 8, 10); // Z=+10 : kite "sous le vent" dans l'hémisphère Z+
+        // ✅ Position initiale depuis config : (0, 5, 13) = lignes 15m détendues au départ
+        const initPos = this.config.behavior.debugPositions.lift;
+        initialState.position.set(initPos.x, initPos.y, initPos.z);
         
         // ═══════════════════════════════════════════════════════════════════════════
         // ORIENTATION INITIALE DU CERF-VOLANT (CRITIQUE)
@@ -173,14 +178,15 @@ export class NewSimulation {
         ));
         
         // Créer le PhysicsEngine d'abord (sans lineCalculator pour l'instant)
-        // ✅ CORRECTION: Le vent souffle de Z- vers Z+ (pousse le kite vers l'horizon)
+        // ✅ PHYSIQUE CORRECTE: Le vent VA de Z- vers Z+ (depuis l'avant vers l'horizon)
+        // Représentation vectorielle ici: le vecteur vitesse du vent pointe vers Z+
         this.physicsEngine = new PhysicsEngine(
             this.kite,
             integrator,
             forceManager,
             {
-                velocity: new THREE.Vector3(0, 0, this.config.wind.speed), // Vent vers Z+
-                direction: new THREE.Vector3(0, 0, 1), // Direction vers Z+
+                velocity: new THREE.Vector3(0, 0, this.config.wind.speed), // Vent VA vers Z+
+                direction: new THREE.Vector3(0, 0, 1), // Direction normalisée du vecteur vitesse
                 speed: this.config.wind.speed,
                 turbulence: this.config.wind.turbulence,
             },
@@ -199,6 +205,7 @@ export class NewSimulation {
         this.geometryLabelsVisualizer = new GeometryLabelsVisualizer();
         this.panelNumbersVisualizer = new PanelNumbersVisualizer();
         this.panelNormalsVisualizer = new PanelNormalsVisualizer();
+        this.apparentWindVisualizer = new ApparentWindVisualizer();
         
         // Récupérer positions treuils pour initialiser le calculateur de lignes
         const winchPositions = this.controlStationVisualizer.getWinchPositions();
@@ -250,12 +257,14 @@ export class NewSimulation {
         this.scene.add(this.geometryLabelsVisualizer.getObject());
         this.scene.add(this.panelNumbersVisualizer.getObject());
         this.scene.add(this.panelNormalsVisualizer.getObject3D());
+        this.scene.add(this.apparentWindVisualizer.getObject3D());
         
         // Configurer visibilité debug
         this.forceVisualizer.setVisible(this.config.rendering.showDebug);
         console.log(`🔍 Vecteurs de forces: ${this.config.rendering.showDebug ? 'ACTIVÉS ✅' : 'DÉSACTIVÉS ❌'}`);
         this.panelNumbersVisualizer.setVisible(true);
         this.panelNormalsVisualizer.getObject3D().visible = true;
+        this.apparentWindVisualizer.setVisible(false); // Désactivé par défaut
         
         // 6. Configurer événements
         this.setupEventListeners();
@@ -274,7 +283,7 @@ export class NewSimulation {
         console.log(`📊 Vecteurs forces: ${this.config.rendering.showDebug ? '✅ ACTIFS (mode détaillé par panneau)' : '❌ DÉSACTIVÉS'}`);
         console.log(`🔄 Auto-reset: ${this.config.behavior.autoReset.enabled ? '✅' : '❌'} Actif (${this.config.behavior.autoReset.stabilityDuration}s au sol < ${this.config.behavior.autoReset.groundThreshold}m)`);
         console.log(`⚙️  Timestep physique: ${this.config.physics.fixedTimeStep ? (this.config.physics.fixedTimeStep * 1000).toFixed(2) + 'ms' : 'variable'}`);
-        console.log(`💨 Vent: ${this.config.wind.speed} m/s (vecteur: 0, 0, ${this.config.wind.speed})`);
+    console.log(`💨 Vent: ${this.config.wind.speed} m/s (vecteur: 0, 0, ${this.config.wind.speed})`);
         console.log(`⚖️  Masse kite: ${this.config.kite.mass} kg`);
         console.log(`📍 Position initiale: ${this.kite.getState().position.toArray().map(v => v.toFixed(1)).join(', ')}`);
         console.log(`🧭 Orientation: ${this.kite.getState().orientation.toArray().map(v => v.toFixed(3)).join(', ')}`);
@@ -459,14 +468,20 @@ export class NewSimulation {
     /**
      * Met à jour la simulation avec fixed timestep et accumulation.
      * ✅ AMÉLIORATION: Utilise l'accumulation pour garantir stabilité physique
-     * même avec FPS variable
+     * même avec FPS variable. Supporte le mode ralenti.
      */
     private update(deltaTime: number): void {
         // Récupérer le pas de temps fixe de la physique
         const fixedDt = this.config.physics.fixedTimeStep ?? (1/60);
         
+        // Appliquer le facteur de ralentissement si le mode ralenti est activé
+        let effectiveDeltaTime = deltaTime;
+        if (this.config.behavior.slowMotion.enabled) {
+            effectiveDeltaTime = deltaTime * this.config.behavior.slowMotion.factor;
+        }
+        
         // Ajouter le temps écoulé à l'accumulator
-        this.accumulator += deltaTime;
+        this.accumulator += effectiveDeltaTime;
         
         // ✅ FIXED TIMESTEP: Simuler par pas fixes tant qu'il reste du temps
         let substeps = 0;
@@ -509,8 +524,8 @@ export class NewSimulation {
             const simState: SimulationState = {
                 kite: state,
                 wind: {
-                    velocity: new THREE.Vector3(0, 0, this.config.wind.speed), // Vent vers Z+
-                    direction: new THREE.Vector3(0, 0, 1), // Direction vers Z+
+                    velocity: new THREE.Vector3(0, 0, -this.config.wind.speed), // Vent vers Z+ (de Z- vers Z+)
+                    direction: new THREE.Vector3(0, 0, -1), // Direction vers Z+ (normale)
                     speed: this.config.wind.speed,
                     turbulence: 0,
                 },
@@ -529,6 +544,8 @@ export class NewSimulation {
                     leftTension: 0,
                     rightTension: 0,
                     totalTension: 0,
+                    leftDistance: 0,  // 🆕
+                    rightDistance: 0, // 🆕
                 },
                 elapsedTime: this.clock.getElapsedTime(),
                 deltaTime: fixedDt,
@@ -541,6 +558,7 @@ export class NewSimulation {
             this.geometryLabelsVisualizer.update(this.kite, this.controlStationVisualizer);
             this.panelNumbersVisualizer.update(this.kite);
             this.panelNormalsVisualizer.update(this.kite, state);
+            this.apparentWindVisualizer.update(this.kite, state, simState.wind);
             
             // Publier événement
             this.eventBus.publish({
@@ -593,6 +611,9 @@ export class NewSimulation {
             
             // Mise à jour des normales de panneaux
             this.panelNormalsVisualizer.update(this.kite, state);
+            
+            // Mise à jour du vent apparent
+            this.apparentWindVisualizer.update(this.kite, fixedSimState.kite, fixedSimState.wind);
             
             // ✅ Mode debug portance : visualiseur unifié en mode détaillé (forces par panneau)
             this.forceVisualizer.setVisible(true);
@@ -667,6 +688,9 @@ export class NewSimulation {
         
         // Mise à jour des normales de panneaux
         this.panelNormalsVisualizer.update(this.kite, simState.kite);
+        
+        // Mise à jour du vent apparent
+        this.apparentWindVisualizer.update(this.kite, simState.kite, simState.wind);
         
         // Trajectoire (ajout conditionnel)
         if (simState.elapsedTime % 0.1 < fixedDt) {
@@ -761,17 +785,18 @@ export class NewSimulation {
     /**
      * Log l'état de vol condensé avec informations pertinentes.
      * ✅ OPTIMISÉ: Réduit drastiquement la fréquence des logs
+     * ✅ NOUVEAU: Enregistre aussi un snapshot complet pour l'UI
      */
     private logState(simState: SimulationState): void {
-        // ✅ LOGS ULTRA-CONDENSÉS - Seulement toutes les 5 secondes
-        if (Math.floor(simState.elapsedTime) % 5 !== 0 || simState.elapsedTime - Math.floor(simState.elapsedTime) > 0.5) {
+        // ✅ LOGS ULTRA-CONDENSÉS - Seulement toutes les 2 secondes
+        if (Math.floor(simState.elapsedTime * 2) % 4 !== 0 || simState.elapsedTime - Math.floor(simState.elapsedTime) > 0.5) {
             return;
         }
         
-        const { position, velocity, acceleration } = simState.kite;
-        const { leftTension, rightTension, totalTension } = simState.lines;
+        const { position, velocity, acceleration, orientation } = simState.kite;
+        const { leftTension, rightTension, totalTension, leftDistance, rightDistance } = simState.lines;
         const { speed: windSpeed } = simState.wind;
-        const { aerodynamic, total } = simState.forces;
+        const { aerodynamic, gravity, lines: linesForce, total } = simState.forces;
 
         // Altitude et position
         const altitude = position.y.toFixed(1);
@@ -786,11 +811,69 @@ export class NewSimulation {
         const tensionBalance = Math.abs(leftTension - rightTension).toFixed(0);
         const accel = acceleration.length().toFixed(0);
 
-        // 🔧 LOG CONDENSÉ - Une seule ligne
+        // 🔧 LOG CONDENSÉ - Une seule ligne (conservé pour compatibilité console)
         const flightLog = `T${simState.elapsedTime.toFixed(1)}s Alt:${altitude}m V:${groundSpeed}m/s ` +
                          `Lift:${liftForce}N Tot:${totalForce}N Acc:${accel}m/s² Tens:${totalTension.toFixed(0)}N`;
 
         this.logger.flightStatus(flightLog);
+
+        // ✅ NOUVEAU: Enregistrer un snapshot complet pour affichage UI
+        // Convertir le quaternion en angles d'Euler pour lisibilité
+        const euler = new THREE.Euler().setFromQuaternion(orientation);
+        
+        this.logger.logSimulationSnapshot({
+            time: simState.elapsedTime,
+            position: {
+                x: position.x,
+                y: position.y,
+                z: position.z
+            },
+            orientation: {
+                pitch: euler.x * 180 / Math.PI,
+                roll: euler.z * 180 / Math.PI,
+                yaw: euler.y * 180 / Math.PI
+            },
+            velocity: {
+                x: velocity.x,
+                y: velocity.y,
+                z: velocity.z
+            },
+            forces: {
+                aerodynamic: {
+                    x: aerodynamic.x,
+                    y: aerodynamic.y,
+                    z: aerodynamic.z
+                },
+                gravity: {
+                    x: gravity.x,
+                    y: gravity.y,
+                    z: gravity.z
+                },
+                lines: {
+                    x: linesForce.x,
+                    y: linesForce.y,
+                    z: linesForce.z
+                },
+                total: {
+                    x: total.x,
+                    y: total.y,
+                    z: total.z
+                }
+            },
+            lines: {
+                leftTension: leftTension,
+                rightTension: rightTension,
+                totalTension: totalTension,
+                leftDistance: leftDistance,         // 🆕 Distance réelle ligne gauche
+                rightDistance: rightDistance,       // 🆕 Distance réelle ligne droite
+                targetLength: this.config.lines.baseLength  // 🆕 Longueur objectif
+            }
+        });
+
+        // ✅ Mettre à jour l'affichage des snapshots dans l'UI
+        if (this.uiReference) {
+            this.uiReference.displaySimulationSnapshots(this.logger);
+        }
 
         // ✅ Logs avancés complètement désactivés pour performance
         // this.logCriticalEvents(simState);
@@ -965,8 +1048,9 @@ export class NewSimulation {
             // Il sera automatiquement utilisé en mode approprié
             
             const initialState = createInitialState();
-            // ✅ CORRECTION: Position initiale Z=+10, Y=8
-            initialState.position.set(0, 8, 10);
+            // ✅ CORRECTION: Utiliser la position de config (cohérence avec mode debug)
+            const initPos = this.config.behavior.debugPositions.lift;
+            initialState.position.set(initPos.x, initPos.y, initPos.z);
             console.log('🔄 [RESET] Position initiale définie:', initialState.position);
             // ═══════════════════════════════════════════════════════════════════════════
             // ORIENTATION RESET (même que orientation initiale)
@@ -1069,6 +1153,7 @@ export class NewSimulation {
         this.geometryLabelsVisualizer.dispose();
         this.panelNumbersVisualizer.dispose();
         this.panelNormalsVisualizer.dispose();
+        this.apparentWindVisualizer.dispose();
         this.scene.dispose();
         this.renderer.dispose();
         this.camera.dispose();
@@ -1316,14 +1401,15 @@ export class NewSimulation {
     }
     
     /**
-     * Active/désactive l'affichage des vecteurs de forces (debug).
+     * Active/désactive l'affichage des vecteurs de forces (debug) ET du vent apparent.
      */
     public toggleForceVectors(): void {
         this.config.rendering.showDebug = !this.config.rendering.showDebug;
         this.forceVisualizer.setVisible(this.config.rendering.showDebug); // ✅ Visualiseur unifié
+        this.apparentWindVisualizer.setVisible(this.config.rendering.showDebug); // ✅ Vent apparent inclus
         
         this.logger.control(
-            `🔍 Vecteurs de forces: ${this.config.rendering.showDebug ? 'ACTIVÉS ✅' : 'DÉSACTIVÉS ❌'}`
+            `🔍 Vecteurs de forces + vent apparent: ${this.config.rendering.showDebug ? 'ACTIVÉS ✅' : 'DÉSACTIVÉS ❌'}`
         );
     }
     
@@ -1340,6 +1426,35 @@ export class NewSimulation {
     }
     
     /**
+     * Active/désactive le mode ralenti.
+     */
+    public toggleSlowMotion(): void {
+        this.config.behavior.slowMotion.enabled = !this.config.behavior.slowMotion.enabled;
+        
+        if (this.config.behavior.slowMotion.enabled) {
+            this.logger.control(
+                `⏱️ Mode ralenti ACTIVÉ (${(this.config.behavior.slowMotion.factor * 100).toFixed(0)}%)`
+            );
+        } else {
+            this.logger.control('⏱️ Mode ralenti DÉSACTIVÉ');
+        }
+    }
+    
+    /**
+     * Définit le facteur de ralentissement (0.1 = 10x plus lent, 1.0 = normal).
+     */
+    public setSlowMotionFactor(factor: number): void {
+        // Limiter entre 0.1 (10x plus lent) et 1.0 (temps réel)
+        this.config.behavior.slowMotion.factor = Math.max(0.1, Math.min(1.0, factor));
+        
+        if (this.config.behavior.slowMotion.enabled) {
+            this.logger.control(
+                `⏱️ Vitesse ajustée: ${(this.config.behavior.slowMotion.factor * 100).toFixed(0)}%`
+            );
+        }
+    }
+    
+    /**
      * Change la vitesse du vent dynamiquement.
      */
     public setWindSpeed(speed: number): void {
@@ -1347,8 +1462,8 @@ export class NewSimulation {
         
         // ✅ CORRECTION: Le vent souffle de Z- vers Z+ (pousse le kite vers l'horizon)
         this.physicsEngine.setWindState({
-            velocity: new THREE.Vector3(0, 0, speed), // Vent vers Z+
-            direction: new THREE.Vector3(0, 0, 1), // Direction vers Z+
+            velocity: new THREE.Vector3(0, 0, -speed), // Vent vers Z+ (de Z- vers Z+)
+            direction: new THREE.Vector3(0, 0, -1), // Direction vers Z+ (normale)
             speed: speed,
             turbulence: this.config.wind.turbulence,
         });

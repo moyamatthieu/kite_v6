@@ -6,7 +6,7 @@
 
 import './UserInterface.css';
 import { SimulationEventType, EventBus } from '../../core/types/Events';
-import { Logger, LogEntry, LogLevel } from '../../application/logging/Logger';
+import { Logger, LogEntry, LogLevel, SimulationSnapshot } from '../../application/logging/Logger';
 
 export interface UICallbacks {
     onReset?: () => void;
@@ -22,6 +22,8 @@ export interface UICallbacks {
     onLiftDebugToggle?: () => void;
     onForceVectorsToggle?: () => void;
     onPanelNumbersToggle?: () => void;
+    onSlowMotionToggle?: () => void;
+    onSlowMotionFactorChange?: (factor: number) => void;
 }
 
 /**
@@ -254,6 +256,30 @@ export class UserInterface {
                     transition: all 0.2s;
                 ">🔢 PANNEAUX</button>
             </div>
+            
+            <div style="margin-bottom: 20px; padding: 10px; background: rgba(138, 43, 226, 0.1); border: 1px solid rgba(138, 43, 226, 0.3); border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <div style="font-size: 12px; color: #8a2be2; font-weight: 600;">
+                        ⏱️ MODE RALENTI
+                    </div>
+                    <label style="display: inline-flex; cursor: pointer;">
+                        <input type="checkbox" id="toggle-slow-motion" style="
+                            width: 40px;
+                            height: 20px;
+                            -webkit-appearance: none;
+                            appearance: none;
+                            background: rgba(138, 43, 226, 0.2);
+                            border-radius: 10px;
+                            position: relative;
+                            cursor: pointer;
+                            outline: none;
+                            transition: all 0.3s;
+                            border: 1px solid rgba(138, 43, 226, 0.4);
+                        ">
+                    </label>
+                </div>
+                ${this.createSlider('slow-motion-speed', 'Vitesse', '%', 10, 100, 1, 100, true)}
+            </div>
 
             ${this.createSlider('wind-speed', '🌬️ Vent', 'm/s', 0, 15, 0.1, 3, true)}
 
@@ -322,12 +348,29 @@ export class UserInterface {
                 background: rgba(255, 215, 0, 0.2) !important;
                 transform: translateY(-1px);
             }
+            #toggle-slow-motion:checked {
+                background: #8a2be2 !important;
+            }
+            #toggle-slow-motion:checked::before {
+                transform: translateX(20px);
+            }
+            #toggle-slow-motion::before {
+                content: '';
+                position: absolute;
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                top: 1px;
+                left: 2px;
+                background: white;
+                transition: transform 0.3s;
+            }
         `;
         document.head.appendChild(style);
     }
 
     /**
-     * Crée le panneau de log (en bas à droite).
+     * Crée le panneau de log (en bas à gauche).
      */
     private createLogPanel(): void {
         this.logPanel = document.createElement('div');
@@ -336,7 +379,7 @@ export class UserInterface {
         this.logPanel.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid rgba(0, 255, 136, 0.2); padding-bottom: 8px;">
                 <div style="font-size: 14px; font-weight: 600; color: #00ff88;">
-                    📝 JOURNAL
+                    📝 JOURNAL DE SIMULATION
                 </div>
                 <button id="btn-copy-log" style="
                     background: rgba(0, 255, 136, 0.1);
@@ -347,13 +390,17 @@ export class UserInterface {
                     font-size: 11px;
                     cursor: pointer;
                     transition: all 0.2s;
-                ">📋 Copier</button>
+                ">📋 Copier (10 derniers)</button>
             </div>
             <div id="log-content" style="
                 max-height: 230px;
                 overflow-y: auto;
-                font-size: 13px;
-                line-height: 1.6;
+                font-size: 10px;
+                line-height: 1.4;
+                font-family: 'Courier New', monospace;
+                background: rgba(0, 0, 0, 0.4);
+                border-radius: 6px;
+                padding: 8px;
             "></div>
         `;
         
@@ -681,6 +728,26 @@ export class UserInterface {
             this.callbacks.onPanelNumbersToggle?.();
             this.addLog('🔢 Numéros de panneaux basculés', 'info');
         });
+        
+        // Toggle mode ralenti
+        const toggleSlowMotion = document.getElementById('toggle-slow-motion') as HTMLInputElement;
+        toggleSlowMotion?.addEventListener('change', (e) => {
+            const enabled = (e.target as HTMLInputElement).checked;
+            this.callbacks.onSlowMotionToggle?.();
+            this.addLog(`⏱️ Mode ralenti ${enabled ? 'activé' : 'désactivé'}`, 'info');
+        });
+        
+        // Slider vitesse ralenti
+        const slowMotionSpeedSlider = document.getElementById('slow-motion-speed-slider') as HTMLInputElement;
+        const slowMotionSpeedValue = document.getElementById('slow-motion-speed-value');
+        
+        slowMotionSpeedSlider?.addEventListener('input', () => {
+            const speedPercent = parseFloat(slowMotionSpeedSlider.value);
+            const factor = speedPercent / 100; // Convertir % en facteur (0.1 à 1.0)
+            slowMotionSpeedValue!.textContent = `${speedPercent.toFixed(0)} %`;
+            this.callbacks.onSlowMotionFactorChange?.(factor);
+            this.addLog(`⏱️ Vitesse: ${speedPercent.toFixed(0)}%`, 'info');
+        });
 
         // Slider vitesse du vent
         const windSpeedSlider = document.getElementById('wind-speed-slider') as HTMLInputElement;
@@ -823,17 +890,28 @@ export class UserInterface {
      * Copie le log dans le presse-papiers.
      */
     private async copyLog(): Promise<void> {
-        const logText = this.logEntries
-            .map(entry => {
-                const div = document.createElement('div');
-                div.innerHTML = entry;
-                return div.textContent || '';
-            })
-            .join('\n');
+        // ✅ NOUVEAU: Copier les snapshots formatés si disponibles
+        const logger = (this as any).logger as Logger | undefined;
+        
+        let logText = '';
+        
+        if (logger) {
+            // Copier les snapshots formatés
+            logText = logger.formatSnapshots();
+        } else {
+            // Fallback: copier les logs HTML actuels
+            logText = this.logEntries
+                .map(entry => {
+                    const div = document.createElement('div');
+                    div.innerHTML = entry;
+                    return div.textContent || '';
+                })
+                .join('\n');
+        }
         
         try {
             await navigator.clipboard.writeText(logText);
-            this.addLog('📋 Log copié dans le presse-papiers', 'success');
+            this.addLog('📋 Journal copié (10 dernières entrées)', 'success');
         } catch (err) {
             this.addLog('❌ Erreur lors de la copie', 'error');
         }
@@ -969,7 +1047,118 @@ Orientation:
         const unsubscribe = logger.subscribe((entry: LogEntry) => {
             this.addStructuredLog(entry);
         });
+        
+        // ✅ NOUVEAU: Stocker la référence au logger pour accès aux snapshots
+        (this as any).logger = logger;
+        
         return unsubscribe;
+    }
+
+    /**
+     * ✅ NOUVEAU: Affiche les snapshots de simulation dans le panneau de log.
+     */
+    public displaySimulationSnapshots(logger: Logger): void {
+        const snapshots = logger.getSimulationSnapshots();
+        
+        if (snapshots.length === 0) {
+            this.logContent.innerHTML = '<div style="color: #666; text-align: center; padding: 20px;">Aucune donnée disponible</div>';
+            return;
+        }
+
+        /**
+         * Formatte un nombre avec gestion des valeurs aberrantes.
+         */
+        const formatNumber = (value: number, decimals: number = 1): string => {
+            if (!isFinite(value) || isNaN(value)) {
+                return '<span style="color: #ff4444;">NaN</span>';
+            }
+            
+            const absValue = Math.abs(value);
+            
+            // Valeurs aberrantes (>1e10) en notation scientifique
+            if (absValue > 1e10) {
+                return `<span style="color: #ff4444;" title="${value}">${value.toExponential(1)}</span>`;
+            }
+            
+            // Valeurs très grandes (>1000) avec warning
+            if (absValue > 1000) {
+                return `<span style="color: #ffaa00;">${value.toFixed(decimals)}</span>`;
+            }
+            
+            // Valeurs normales
+            return value.toFixed(decimals);
+        };
+
+        // Vider le contenu actuel
+        this.logContent.innerHTML = '';
+
+        // Afficher chaque snapshot
+        snapshots.forEach((snapshot, index) => {
+            const num = (index + 1).toString().padStart(2, '0');
+            const time = snapshot.time.toFixed(1);
+            
+            // Calculer les magnitudes
+            const vMag = Math.sqrt(
+                snapshot.velocity.x ** 2 + 
+                snapshot.velocity.y ** 2 + 
+                snapshot.velocity.z ** 2
+            );
+            
+            const aeroMag = Math.sqrt(
+                snapshot.forces.aerodynamic.x ** 2 + 
+                snapshot.forces.aerodynamic.y ** 2 + 
+                snapshot.forces.aerodynamic.z ** 2
+            );
+            
+            const totalForceMag = Math.sqrt(
+                snapshot.forces.total.x ** 2 + 
+                snapshot.forces.total.y ** 2 + 
+                snapshot.forces.total.z ** 2
+            );
+
+            // Créer l'élément de snapshot
+            const snapshotDiv = document.createElement('div');
+            snapshotDiv.style.cssText = `
+                background: rgba(0, 255, 136, 0.05);
+                border: 1px solid rgba(0, 255, 136, 0.2);
+                border-radius: 4px;
+                padding: 6px;
+                margin-bottom: 6px;
+                font-size: 9px;
+                line-height: 1.3;
+            `;
+
+            // Format compact pour chaque snapshot avec formatage intelligent
+            snapshotDiv.innerHTML = `
+                <div style="color: #00ff88; font-weight: 600; margin-bottom: 3px; border-bottom: 1px solid rgba(0, 255, 136, 0.2); padding-bottom: 2px;">
+                    #${num} - T=${time}s
+                </div>
+                <div style="color: #00aaff;">
+                    <strong>POS:</strong> X:${formatNumber(snapshot.position.x)} Y:${formatNumber(snapshot.position.y)} Z:${formatNumber(snapshot.position.z)}
+                </div>
+                <div style="color: #00aaff;">
+                    <strong>VEL:</strong> ${formatNumber(vMag, 2)} m/s (X:${formatNumber(snapshot.velocity.x)} Y:${formatNumber(snapshot.velocity.y)} Z:${formatNumber(snapshot.velocity.z)})
+                </div>
+                <div style="color: #ffaa00;">
+                    <strong>ORI:</strong> P:${formatNumber(snapshot.orientation.pitch, 0)}° R:${formatNumber(snapshot.orientation.roll, 0)}° Y:${formatNumber(snapshot.orientation.yaw, 0)}°
+                </div>
+                <div style="color: #ff88ff;">
+                    <strong>AÉRO:</strong> ${formatNumber(aeroMag)}N 
+                    (Y:${formatNumber(snapshot.forces.aerodynamic.y)}N portance)
+                </div>
+                <div style="color: #ff88ff;">
+                    <strong>LIGNES:</strong> G:${formatNumber(snapshot.lines.leftTension, 0)}N D:${formatNumber(snapshot.lines.rightTension, 0)}N Tot:${formatNumber(snapshot.lines.totalTension, 0)}N
+                </div>
+                <div style="color: #fff;">
+                    <strong>TOTAL:</strong> ${formatNumber(totalForceMag)}N (X:${formatNumber(snapshot.forces.total.x)} Y:${formatNumber(snapshot.forces.total.y)} Z:${formatNumber(snapshot.forces.total.z)})
+                </div>
+            `;
+
+            this.logContent.appendChild(snapshotDiv);
+        });
+
+        // Auto-scroll vers le bas
+        this.logContent.scrollTop = this.logContent.scrollHeight;
     }
 
     /**

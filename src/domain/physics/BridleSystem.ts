@@ -403,7 +403,10 @@ export class BridleSystem {
             });
         }
         
-        // 3. Calculer les directions des brides (contrôle → attaches)
+        // 3. Calculer les directions des brides (attaches → contrôle)
+        // PHYSIQUE : Les brides tirent les points d'attache VERS le point de contrôle
+        // Mais pour le calcul matriciel, on utilise la direction de propagation de la force
+        // (du point de contrôle vers les attaches), puis on applique les tensions avec le bon signe
         const dirNose = this.tempVector1.subVectors(nosePos, controlPointPos).normalize();
         const dirIntermediate = this.tempVector2.subVectors(intermediatePos, controlPointPos).normalize();
         const dirCenter = this.tempVector3.subVectors(centerPos, controlPointPos).normalize();
@@ -434,18 +437,44 @@ export class BridleSystem {
         // Le rappel des lignes DOIT pouvoir agir pour ramener le kite
         
         // 5. Calculer les forces vectorielles sur chaque point d'attache (avec protection smooth)
-        const forceNose = dirNose.clone().multiplyScalar(tensions.nose * tensionMultiplier);
-        const forceIntermediate = dirIntermediate.clone().multiplyScalar(tensions.intermediate * tensionMultiplier);
-        const forceCenter = dirCenter.clone().multiplyScalar(tensions.center * tensionMultiplier);
+        // 
+        // RAISONNEMENT PHYSIQUE COMPLET :
+        // 
+        // 1. Au point de contrôle C (masse négligeable, équilibre) :
+        //    F_ligne + (T1·dir1 + T2·dir2 + T3·dir3) = 0
+        //    Où dir_i = (A_i - C) / |A_i - C| (du contrôle vers l'attache)
+        // 
+        // 2. On résout : T1·dir1 + T2·dir2 + T3·dir3 = -F_ligne
+        //    Les tensions T1, T2, T3 sont les magnitudes des forces au point C
+        // 
+        // 3. Chaque bride est un fil tendu :
+        //    - Force sur C (par bride i) : +T_i × dir_i (pousse C vers A_i)
+        //    - Force sur A_i (par réaction) : -T_i × dir_i (tire A_i vers C)
+        // 
+        // 4. Donc la force appliquée à chaque point d'attache est :
+        //    F_A_i = -T_i × dir_i
+        // 
+        // 5. Vérification : F_total = -(T1·dir1 + T2·dir2 + T3·dir3) = -(-F_ligne) = F_ligne ✅
+        //
+        const forceNose = dirNose.clone().multiplyScalar(-tensions.nose * tensionMultiplier);
+        const forceIntermediate = dirIntermediate.clone().multiplyScalar(-tensions.intermediate * tensionMultiplier);
+        const forceCenter = dirCenter.clone().multiplyScalar(-tensions.center * tensionMultiplier);
         
-        // 6. Force totale = somme des 3 forces (doit être ≈ -lineForce)
+        // 6. Force totale = somme des 3 forces (doit être ≈ F_ligne par conservation)
         const totalForce = new THREE.Vector3()
             .add(forceNose)
             .add(forceIntermediate)
             .add(forceCenter);
         
+        // 🔍 DEBUG TEMPORAIRE : Vérifier conservation force
+        if (Math.random() < 0.01) { // Log 1% du temps
+            console.log(`[BridleSystem] Force ligne entrée: (${lineForce.x.toFixed(1)}, ${lineForce.y.toFixed(1)}, ${lineForce.z.toFixed(1)}) N`);
+            console.log(`[BridleSystem] Force totale sortie: (${totalForce.x.toFixed(1)}, ${totalForce.y.toFixed(1)}, ${totalForce.z.toFixed(1)}) N`);
+            console.log(`[BridleSystem] Différence (devrait ≈ 0): (${(totalForce.x - lineForce.x).toFixed(1)}, ${(totalForce.y - lineForce.y).toFixed(1)}, ${(totalForce.z - lineForce.z).toFixed(1)}) N`);
+        }
+        
         // 7. Vérification conservation force (debug)
-        const forceError = totalForce.clone().add(lineForce).length();
+        const forceError = totalForce.clone().sub(lineForce).length();
         if (forceError > 0.1) {  // Erreur > 0.1 N
             console.warn('[BridleSystem] Erreur conservation force:', forceError.toFixed(3), 'N');
         }

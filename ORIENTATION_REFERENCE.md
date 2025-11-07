@@ -39,11 +39,11 @@ Ce document centralise **TOUTES** les informations critiques sur l'orientation d
 Le vent **souffle depuis Z- vers Z+** (du pilote vers l'horizon) :
 
 ```typescript
-// Vecteur vélocité du vent
-windVelocity = new THREE.Vector3(0, 0, -windSpeed);  // Négatif car souffle vers Z-
+// Vecteur vélocité du vent (VA vers Z+, donc positif)
+windVelocity = new THREE.Vector3(0, 0, +windSpeed);  // Positif car va vers Z+
 
 // Direction normalisée
-windDirection = new THREE.Vector3(0, 0, -1);  // Pointe vers Z-
+windDirection = new THREE.Vector3(0, 0, +1);  // Pointe vers Z+
 ```
 
 ### Interaction avec le Cerf-Volant

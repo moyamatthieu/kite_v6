@@ -36,6 +36,9 @@ export interface LineForceConfig {
 
     /** 🔧 NOUVEAU : Taux de croissance exponentiel (1/m) */
     exponentialRate: number;
+
+    /** 🔧 NOUVEAU : Tension maximale sûre (N) avant clamp (rupture ligne) */
+    maxTension: number;
 }
 
 /**
@@ -91,6 +94,7 @@ export class LineForceCalculator implements ILineForceCalculator {
             exponentialThreshold: config?.exponentialThreshold ?? 1.0,
             exponentialStiffness: config?.exponentialStiffness ?? 50,
             exponentialRate: config?.exponentialRate ?? 1.5,
+            maxTension: config?.maxTension ?? 400,
         };
         
         this.smoothedLeftTension = this.config.minTension;
@@ -221,6 +225,32 @@ export class LineForceCalculator implements ILineForceCalculator {
             .add(leftBridleResult.torque)
             .add(rightBridleResult.torque);
         
+        // 🔍 LOG DÉTAILLÉ : Distances et extensions des lignes (1% du temps pour éviter spam)
+        if (Math.random() < 0.01) {
+            const leftExtension = leftLineForceData.distance - leftLength;
+            const rightExtension = rightLineForceData.distance - rightLength;
+            
+            console.log('═══════════════════════════════════════════════════════');
+            console.log('📏 DIAGNOSTIC LIGNES');
+            console.log('═══════════════════════════════════════════════════════');
+            console.log(`LIGNE GAUCHE:`);
+            console.log(`  Treuil      : (${this.winchPositions.left.x.toFixed(2)}, ${this.winchPositions.left.y.toFixed(2)}, ${this.winchPositions.left.z.toFixed(2)})`);
+            console.log(`  Point ctrl  : (${leftControlPoint_CURRENT.x.toFixed(2)}, ${leftControlPoint_CURRENT.y.toFixed(2)}, ${leftControlPoint_CURRENT.z.toFixed(2)})`);
+            console.log(`  Distance    : ${leftLineForceData.distance.toFixed(3)} m`);
+            console.log(`  Longueur obj: ${leftLength.toFixed(3)} m`);
+            console.log(`  Extension   : ${leftExtension.toFixed(3)} m (${((leftExtension/leftLength)*100).toFixed(1)}%)`);
+            console.log(`  Tension     : ${leftLineForceData.tension.toFixed(1)} N`);
+            console.log(``);
+            console.log(`LIGNE DROITE:`);
+            console.log(`  Treuil      : (${this.winchPositions.right.x.toFixed(2)}, ${this.winchPositions.right.y.toFixed(2)}, ${this.winchPositions.right.z.toFixed(2)})`);
+            console.log(`  Point ctrl  : (${rightControlPoint_CURRENT.x.toFixed(2)}, ${rightControlPoint_CURRENT.y.toFixed(2)}, ${rightControlPoint_CURRENT.z.toFixed(2)})`);
+            console.log(`  Distance    : ${rightLineForceData.distance.toFixed(3)} m`);
+            console.log(`  Longueur obj: ${rightLength.toFixed(3)} m`);
+            console.log(`  Extension   : ${rightExtension.toFixed(3)} m (${((rightExtension/rightLength)*100).toFixed(1)}%)`);
+            console.log(`  Tension     : ${rightLineForceData.tension.toFixed(1)} N`);
+            console.log('═══════════════════════════════════════════════════════');
+        }
+        
         return {
             force: totalForce,
             torque: totalTorque,
@@ -270,61 +300,107 @@ export class LineForceCalculator implements ILineForceCalculator {
         
         let tension = 0;
         
-        // 🔧 MODÈLE SIMPLIFIÉ : Lignes TOUJOURS tendues (ressort + amortissement)
-        // 
-        // PROBLÈME IDENTIFIÉ : L'ancien modèle slack/tendu permettait au cerf-volant
-        // de s'éloigner sans contrainte si distance < restLength. C'est FAUX physiquement.
+        // 🔧 MODÈLE CORRIGÉ : Lignes de cerf-volant (tension uniquement)
         // 
         // Un cerf-volant réel :
-        // - Est TOUJOURS sous tension (vent + gravité tirent sur les lignes)
-        // - Ne peut pas "détendre" ses lignes et s'envoler
-        // - Les lignes sont quasi-rigides (allongement < 1%)
+        // - Les lignes NE PEUVENT QUE TIRER (pas pousser)
+        // - Elles sont SOUS TENSION en permanence due au vent et à la gravité
+        // - Pas de "compression" : les lignes ne peuvent pas être plus courtes que leur longueur
+        // - Modèle physique : ressort avec tension minimale (pré-tension)
         //
-        // NOUVEAU MODÈLE : Ressort rigide SYMÉTRIQUE
-        // - Extension (distance > repos) → force vers treuil (rappel)
-        // - Compression (distance < repos) → force vers l'extérieur (maintien longueur)
-        // - Transition smooth, pas de discontinuité
+        // CORRECTION : Seulement extension positive (allongement)
+        // - Si distance < longueur_cible : tension minimale (lignes légèrement tendues)
+        // - Si distance > longueur_cible : ressort linéaire + protection exponentielle
         
-        const extension = currentDistance - restLength; // Peut être positif ou négatif
+        const extension = Math.max(0, currentDistance - restLength); // UNIQUEMENT positif
         
         // Vitesse radiale pour amortissement
         const radialVelocity = attachVelocity.dot(this.tempVector2);
         
-        // Force de rappel (symétrique, pas de zone morte)
+        // Force de rappel (extension uniquement)
         let springForce: number;
         
-        if (Math.abs(extension) < this.config.exponentialThreshold) {
-            // Zone linéaire : F = k × x (symétrique)
+        if (extension < this.config.exponentialThreshold) {
+            // Zone linéaire : F = k × x
             springForce = this.config.stiffness * extension;
         } else {
             // Zone exponentielle : Protection contre sur-étirement
-            const sign = Math.sign(extension);
-            const absExtension = Math.abs(extension);
             const thresholdForce = this.config.stiffness * this.config.exponentialThreshold;
-            const excessExtension = absExtension - this.config.exponentialThreshold;
-            const expTerm = Math.exp(this.config.exponentialRate * excessExtension) - 1;
-            springForce = sign * (this.config.exponentialStiffness * expTerm + thresholdForce);
+            const excessExtension = extension - this.config.exponentialThreshold;
+            
+            // ✅ PROTECTION OVERFLOW : Clamper l'argument exponentiel pour éviter Infinity
+            // exp(20) ≈ 485 millions → Limite à 15 pour sécurité
+            const expArg = Math.min(15, this.config.exponentialRate * excessExtension);
+            const expTerm = Math.exp(expArg) - 1;
+            
+            springForce = this.config.exponentialStiffness * expTerm + thresholdForce;
+            
+            // ✅ PROTECTION SUPPLÉMENTAIRE : Si encore trop grand, clamper directement
+            const MAX_SPRING_FORCE = 50000; // N - Force maximale physiquement possible
+            springForce = Math.min(MAX_SPRING_FORCE, springForce);
         }
         
-        // Amortissement : F_damp = c × v
+        // Amortissement : F_damp = c × v_radial
         const dampingForce = this.config.damping * radialVelocity;
         
+        // Tension totale
         tension = springForce + dampingForce;
-        // Tension minimale (masse lignes + friction) - TOUJOURS présente
-        tension = Math.max(this.config.minTension, Math.abs(tension)) * Math.sign(tension || 1);
         
-        // Lissage temporel
-        const alpha = this.config.smoothingCoefficient;
+        // ✅ LISSAGE TEMPOREL : Applique le smoothingCoefficient configuré
+        // Évite les variations brutales de tension frame par frame
+        // smoothing = 0.8 → nouvelle tension = 80% ancienne + 20% calculée
         if (isLeft) {
-            this.smoothedLeftTension = alpha * tension + (1 - alpha) * this.smoothedLeftTension;
+            this.smoothedLeftTension = this.config.smoothingCoefficient * this.smoothedLeftTension
+                                     + (1 - this.config.smoothingCoefficient) * tension;
             tension = this.smoothedLeftTension;
         } else {
-            this.smoothedRightTension = alpha * tension + (1 - alpha) * this.smoothedRightTension;
+            this.smoothedRightTension = this.config.smoothingCoefficient * this.smoothedRightTension
+                                      + (1 - this.config.smoothingCoefficient) * tension;
             tension = this.smoothedRightTension;
         }
         
+        // ✅ PHYSIQUE CORRECTE : Pré-tension SEULEMENT si ligne est étirée
+        // Si extension > 0 : ligne tendue, appliquer tension minimale réaliste
+        // Si extension = 0 : ligne détendue, AUCUNE force (peut arriver en décrochage)
+        if (extension > 0) {
+            const preTension = this.config.minTension;
+            tension = Math.max(preTension, tension);
+        } else {
+            // Ligne détendue : aucune force (sauf si vitesse d'approche créerait compression)
+            // Dans ce cas, on clamp à zéro (pas de force de compression possible)
+            tension = Math.max(0, tension);
+        }
+        
+    // ✅ CORRECTION CRITIQUE : Clamper la tension pour éviter explosion numérique
+    // Utilise la limite fournie par la config (ex: Dyneema 100 lbs ≈ 440N)
+    const MAX_SAFE_TENSION = this.config.maxTension;
+        
+        if (!isFinite(tension) || isNaN(tension)) {
+            console.error(`❌ Tension NaN/Inf détectée ${isLeft ? 'gauche' : 'droite'} - CLAMP à MAX`);
+            // ✅ CORRECTION : Clamper à MAX au lieu de reset à 0 !
+            // Si NaN/Inf, c'est qu'il y a une force énorme, pas zéro
+            tension = MAX_SAFE_TENSION;
+        }
+        
+        if (tension > MAX_SAFE_TENSION) {
+            console.warn(`⚠️ Tension excessive ${isLeft ? 'gauche' : 'droite'}: ${tension.toFixed(0)}N (clampé à ${MAX_SAFE_TENSION}N)`);
+            tension = MAX_SAFE_TENSION;
+        }
+        
+        // ✅ Les lignes ne peuvent que TIRER, jamais pousser
+        tension = Math.max(0, tension);
+        
         // Force = tension × direction (vers le treuil) - réutilise tempVector2 qui contient lineDirection
         const force = this.tempVector2.clone().multiplyScalar(-tension);
+        
+        // 🔍 DEBUG TEMPORAIRE : Vérifier direction force
+        if (Math.random() < 0.01) { // Log 1% du temps pour éviter spam
+            console.log(`[LineForce] ${isLeft ? 'GAUCHE' : 'DROITE'} - Treuil: (${winchPos.x.toFixed(2)}, ${winchPos.y.toFixed(2)}, ${winchPos.z.toFixed(2)})`);
+            console.log(`[LineForce] ${isLeft ? 'GAUCHE' : 'DROITE'} - Attache: (${attachPos.x.toFixed(2)}, ${attachPos.y.toFixed(2)}, ${attachPos.z.toFixed(2)})`);
+            console.log(`[LineForce] ${isLeft ? 'GAUCHE' : 'DROITE'} - Direction: (${this.tempVector2.x.toFixed(3)}, ${this.tempVector2.y.toFixed(3)}, ${this.tempVector2.z.toFixed(3)})`);
+            console.log(`[LineForce] ${isLeft ? 'GAUCHE' : 'DROITE'} - Tension: ${tension.toFixed(1)}N`);
+            console.log(`[LineForce] ${isLeft ? 'GAUCHE' : 'DROITE'} - Force: (${force.x.toFixed(1)}, ${force.y.toFixed(1)}, ${force.z.toFixed(1)}) N`);
+        }
         
         return { force, tension, distance: currentDistance };
     }
@@ -333,11 +409,7 @@ export class LineForceCalculator implements ILineForceCalculator {
      * Réinitialise les tensions lissées (appelé lors d'un reset).
      */
     reset(): void {
-        // ✅ CORRECTION: Réinitialiser à 0 (pas de tension artificielle au démarrage)
-        this.smoothedLeftTension = 0;
-        this.smoothedRightTension = 0;
-        
-        // ✅ CORRECTION: Réinitialiser aussi le cache des positions contraintes
+        // ✅ CORRECTION: Réinitialiser le cache des positions contraintes
         // Pour forcer un recalcul complet à la prochaine frame
         this.leftControlPointCache = undefined;
         this.rightControlPointCache = undefined;

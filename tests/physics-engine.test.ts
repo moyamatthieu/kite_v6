@@ -66,6 +66,7 @@ describe('Moteur Physique - Simulation de vol (5s) avec rapport ASCII', () => {
     
     forceManager.addCalculator(new GravityForceCalculator(
       kite.properties.mass,
+      kite, // Pass the kite object here
       DEFAULT_CONFIG.physics.gravity
     ))
     

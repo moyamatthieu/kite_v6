@@ -110,6 +110,15 @@ function bootstrap() {
             onPanelNumbersToggle: () => {
                 simulation.togglePanelNumbers();
             },
+            onApparentWindToggle: () => {
+                simulation.toggleApparentWind();
+            },
+            onSlowMotionToggle: () => {
+                simulation.toggleSlowMotion();
+            },
+            onSlowMotionFactorChange: (factor) => {
+                simulation.setSlowMotionFactor(factor);
+            },
         }
     );
     

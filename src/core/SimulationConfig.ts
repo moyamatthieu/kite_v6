@@ -89,6 +89,8 @@ export interface LinesConfig {
     exponentialThreshold: number; // m
     exponentialStiffness: number; // N
     exponentialRate: number; // 1/m
+    /** Tension maximale physique (N) avant rupture (Dyneema ~100 lbs ≈ 440 N) */
+    maxTension: number; // N
     
     /** 🎯 NOUVEAUTÉ : Configuration système de brides (chaîne de transmission) */
     bridles: BridlesConfig;
@@ -164,6 +166,11 @@ export interface SimulationBehaviorConfig {
         geometry: { x: number; y: number; z: number }; // Position debug géométrie
         lift: { x: number; y: number; z: number }; // Position debug portance
     };
+    /** Mode ralenti */
+    slowMotion: {
+        enabled: boolean; // Activer le mode ralenti
+        factor: number; // Facteur de ralentissement (0.1 = 10x plus lent, 0.5 = 2x plus lent, 1.0 = normal)
+    };
 }
 
 /**
@@ -210,17 +217,16 @@ export const DEFAULT_CONFIG: SimulationConfig = {
                 center: 0.65,  // m - Longueur bride centre
             }
         },
-        // ✅ COEFFICIENTS AÉRODYNAMIQUES CERF-VOLANT (toile plate + structure)
-        // 🔧 AUGMENTÉS pour créer l'effet "pendule" correct
-        // Un cerf-volant doit générer BEAUCOUP de traînée pour se positionner sous le vent
-        // Surface ≈ 1.07 m², vent 10 m/s → Forces ~60-80N nécessaires pour équilibre
-        liftCoefficient: 1.0,   // Cl pour toile plate tendue (augmenté de 0.8)
-        dragCoefficient: 1.0,   // Cd élevé pour cerf-volant (augmenté de 0.8)
+        // ✅ COEFFICIENTS AÉRODYNAMIQUES CORRIGÉS pour forces réalistes
+        // Vent 12 m/s, surface 0.57 m² → Pression dyn 88 Pa
+        // Forces attendues: Lift ~50-80N, Drag ~50-80N pour équilibre
+        liftCoefficient: 1,   // Cl réaliste pour portance (réactivé)
+        dragCoefficient: 1,   // Cd réaliste pour traînée
         // La traînée forte crée l'effet "pendule" qui tire le kite en arrière (vers Z+)
         // et le maintient en tension sur les lignes dans la fenêtre de vol
     },
     wind: {
-        speed: 12.0,  // m/s (36 km/h) - Vent optimal pour cerf-volant acrobatique
+        speed: 10.0,  // m/s (36 km/h) - Vent optimal pour cerf-volant acrobatique
         // Vent léger 3-5 m/s : difficile | Optimal 8-12 m/s : réactif | Fort 15+ m/s : survol
         
         // ═══════════════════════════════════════════════════════════════════════════
@@ -232,39 +238,35 @@ export const DEFAULT_CONFIG: SimulationConfig = {
         // - Station à (0,0,0), cerf-volant en Z+ (ex: 0,8,10)
         // - Cerf-volant REGARDE vers Z- (vers station) pour recevoir le vent de face
         // ═══════════════════════════════════════════════════════════════════════════
-        direction: { x: 0, y: 0, z: -1 }, // Direction normalisée : vers Z-
+        direction: { x: 0, y: 0, z: 1 }, // Direction normalisée : vers Z+ (où VA le vent)
         
         turbulence: 0,  // Pas de turbulence pour l'instant
     },
     lines: {
-        baseLength: 10,  // m - Longueur lignes standard pour cerf-volant acrobatique
+        baseLength: 15,  // m - Longueur lignes standard pour cerf-volant acrobatique (corrigé de 5 à 15)
+        // ✅ PARAMÈTRES LIGNES STABILISÉS (voir CORRECTION_LIGNES_RIGIDES.md)
+        // Raideur réduite pour éviter accélérations > 100 m/s² lors de pics de tension
+        stiffness: 2000,  // N/m (réduit de 5000)
         
-        // ✅ PARAMÈTRES RÉELS lignes Dyneema/Spectra (basés module Young)
-        // Module Young Dyneema : E ≈ 100 GPa
-        // Section ligne 80 lbs : A ≈ 0.5 mm²
-        // k_théorique = E×A/L = 5000 N/m (très rigide)
+        damping: 10,  // Ns/m - Réduit de 50 à 10 pour éviter annulation de la force de rappel
+        // L'amortissement ne doit JAMAIS annuler la force du ressort
+        // c_critique = 2√(k×m) = 2√(5000×0.25) ≈ 71 Ns/m
+        // c = 10 Ns/m = 0.14 × c_crit (très sous-amorti, mais stable)
         
-        stiffness: 10000,  // N/m - AUGMENTÉ drastiquement pour vraie rigidité
-        // k = 10000 N/m → allongement 0.006m (0.06%) pour force 60N
-        // Extension de 1cm → Force = 100N (rappel fort et immédiat)
-        // Les lignes doivent être VRAIMENT rigides, pas un ressort mou
+        smoothingCoefficient: 0.8,  // Lissage fort pour stabilité (validé)
         
-        damping: 50,  // Ns/m - Augmenté proportionnellement pour stabilité
-        // c_critique = 2√(k×m) = 2√(10000×0.25) ≈ 100 Ns/m
-        // c = 0.5 × c_crit = 50 Ns/m (amortissement modéré)
+    // 🔧 TENSION MINIMALE : Pré-tension réaliste (lignes jamais totalement molles)
+    minTension: 10,  // N
         
-        smoothingCoefficient: 0.5,  // Lissage modéré (0.8 trop fort masquait le problème)
+        // Protection exponentielle (zone d'allongement critique >3%)
+        exponentialThreshold: 0.3,  // m - Protection dès 3% d'allongement
+        exponentialStiffness: 500,  // N - Force protection modérée (au lieu de 2000)
+        exponentialRate: 2.0,  // 1/m - Croissance exponentielle modérée
         
-        // 🔧 SUPPRESSION DU MODÈLE SLACK : Les lignes sont TOUJOURS tendues
-        // Un cerf-volant réel ne peut pas "détendre" ses lignes et s'envoler
-        minTension: 5.0,  // N - Tension minimale significative (au lieu de 1N faible)
-        
-        // Protection exponentielle (zone d'allongement critique >1%)
-        exponentialThreshold: 0.1,  // m - Protection dès 1% d'allongement (au lieu de 3%)
-        exponentialStiffness: 2000,  // N - Force protection TRÈS FORTE (×4 vs tentative précédente)
-        exponentialRate: 3.0,  // 1/m - Croissance exponentielle très rapide
-        
-        // 🎯 NOUVEAUTÉ : Système de brides avec résolution de contraintes
+        // ✅ Limite physique de tension (rupture ~ 400–450 N). Garde-fou contre explosion numérique.
+        maxTension: 400, // N
+
+        // 🎯 Système de brides avec résolution de contraintes
         bridles: {
             // Paramètres solveur Newton-Raphson
             maxIterations: 20,  // Augmenté de 15 à 20 pour convergence sur cas difficiles
@@ -306,7 +308,11 @@ export const DEFAULT_CONFIG: SimulationConfig = {
         },
         debugPositions: {
             geometry: { x: 0, y: 3, z: 5 },  // Position centrée, bonne perspective
-            lift: { x: 0, y: 5, z: 10 },  // Position identique à position initiale
+            lift: { x: 0, y: 5, z: 13 },  // Position initiale CORRECTE : lignes 15m, distance 13.9m (lignes détendues au départ)
+        },
+        slowMotion: {
+            enabled: false,  // Mode ralenti désactivé par défaut
+            factor: 1.0,  // Vitesse normale (1.0 = temps réel)
         },
     }
 };
