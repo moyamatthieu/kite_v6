@@ -422,20 +422,16 @@ export class BridleSystem {
             };
         }
         
-        // 🎯 PROTECTION AMÉLIORÉE : Réduire forces si contraintes mal respectées
-        // Utilise une fonction smooth (pas de saut brutal)
+        // 🎯 PROTECTION SIMPLIFIÉE : Ne réduire les forces QUE si erreur vraiment extrême
+        // L'ancienne logique réduisait trop agressivement les forces, empêchant le rappel
         let tensionMultiplier = 1.0;
-        if (maxConstraintError > this.config.convergenceTolerance) {
-            // Fonction de pénalité smooth : exp(-k * error²)
-            const k = 200; // Pente de décroissance
-            const normalizedError = maxConstraintError / this.config.convergenceTolerance;
-            tensionMultiplier = Math.exp(-k * (normalizedError - 1) * (normalizedError - 1));
-            tensionMultiplier = Math.max(0.05, tensionMultiplier); // Minimum 5% des forces
-            
-            if (tensionMultiplier < 0.9) {
-                console.log(`[BridleSystem] Forces réduites à ${(tensionMultiplier * 100).toFixed(0)}% (erreur ${maxConstraintError.toFixed(4)}m)`);
-            }
+        if (maxConstraintError > this.config.convergenceTolerance * 20) {
+            // Erreur > 20× tolérance = 2cm : situation critique, réduire modérément
+            tensionMultiplier = 0.7; // 70% des forces (au lieu de 5-50%)
+            console.warn(`[BridleSystem] Erreur contraintes extrême (${maxConstraintError.toFixed(4)}m) - forces à 70%`);
         }
+        // Sinon : forces à 100%, même si contraintes pas parfaites
+        // Le rappel des lignes DOIT pouvoir agir pour ramener le kite
         
         // 5. Calculer les forces vectorielles sur chaque point d'attache (avec protection smooth)
         const forceNose = dirNose.clone().multiplyScalar(tensions.nose * tensionMultiplier);

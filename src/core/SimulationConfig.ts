@@ -244,27 +244,25 @@ export const DEFAULT_CONFIG: SimulationConfig = {
         // Section ligne 80 lbs : A ≈ 0.5 mm²
         // k_théorique = E×A/L = 5000 N/m (très rigide)
         
-        stiffness: 2000,  // N/m - COMPROMIS réalisme/stabilité numérique
-        // k = 2000 N/m → allongement 0.03m (0.3%) pour force 60N
-        // Valeur 4× supérieure à tentative précédente (500 N/m trop faible)
-        // Encore 2.5× plus souple que théorique (5000) pour stabilité dt=1/60s
+        stiffness: 10000,  // N/m - AUGMENTÉ drastiquement pour vraie rigidité
+        // k = 10000 N/m → allongement 0.006m (0.06%) pour force 60N
+        // Extension de 1cm → Force = 100N (rappel fort et immédiat)
+        // Les lignes doivent être VRAIMENT rigides, pas un ressort mou
         
-        damping: 10,  // Ns/m - Amortissement sous-critique ζ≈0.36
-        // c_critique = 2√(k×m) = 2√(2000×0.25) ≈ 44.7 Ns/m
-        // c = 0.22 × c_crit ≈ 10 Ns/m (sous-amorti, oscillations amorties)
+        damping: 50,  // Ns/m - Augmenté proportionnellement pour stabilité
+        // c_critique = 2√(k×m) = 2√(10000×0.25) ≈ 100 Ns/m
+        // c = 0.5 × c_crit = 50 Ns/m (amortissement modéré)
         
-        smoothingCoefficient: 0.8,  // Lissage numérique MAXIMAL (stabilité avec k élevé)
+        smoothingCoefficient: 0.5,  // Lissage modéré (0.8 trop fort masquait le problème)
         
-        // 🔧 CORRECTION PHYSIQUE : Tension minimale réaliste
-        // Cette valeur simule la masse propre des lignes + friction de l'air
-        // Valeur typique : 0.5-2N pour 10m de ligne Dyneema (masse ≈ 5g/m)
-        // Permet de maintenir contrainte géométrique faible sans bloquer la chute
-        minTension: 1.0,  // N - Tension résiduelle (masse lignes + friction air)
+        // 🔧 SUPPRESSION DU MODÈLE SLACK : Les lignes sont TOUJOURS tendues
+        // Un cerf-volant réel ne peut pas "détendre" ses lignes et s'envoler
+        minTension: 5.0,  // N - Tension minimale significative (au lieu de 1N faible)
         
-        // Protection exponentielle (zone d'allongement critique >3%)
-        exponentialThreshold: 0.3,  // m - Protection dès 3% d'allongement (au lieu de 5%)
-        exponentialStiffness: 500,  // N - Force protection FORTE (×2.5 vs tentative précédente)
-        exponentialRate: 2.0,  // 1/m - Croissance exponentielle rapide
+        // Protection exponentielle (zone d'allongement critique >1%)
+        exponentialThreshold: 0.1,  // m - Protection dès 1% d'allongement (au lieu de 3%)
+        exponentialStiffness: 2000,  // N - Force protection TRÈS FORTE (×4 vs tentative précédente)
+        exponentialRate: 3.0,  // 1/m - Croissance exponentielle très rapide
         
         // 🎯 NOUVEAUTÉ : Système de brides avec résolution de contraintes
         bridles: {

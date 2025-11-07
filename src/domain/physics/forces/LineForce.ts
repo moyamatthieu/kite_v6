@@ -270,63 +270,48 @@ export class LineForceCalculator implements ILineForceCalculator {
         
         let tension = 0;
         
-        // 🔧 CORRECTION PHYSIQUE CRITIQUE : Modèle réaliste des lignes
+        // 🔧 MODÈLE SIMPLIFIÉ : Lignes TOUJOURS tendues (ressort + amortissement)
         // 
-        // PRINCIPE : Un fil peut TIRER mais pas POUSSER
-        // - Si ligne détendue (L < L_repos) : tension = 0 (chute libre autorisée)
-        // - Si ligne tendue (L ≥ L_repos) : tension selon modèle ressort-amortisseur
+        // PROBLÈME IDENTIFIÉ : L'ancien modèle slack/tendu permettait au cerf-volant
+        // de s'éloigner sans contrainte si distance < restLength. C'est FAUX physiquement.
         // 
-        // CORRECTION IMPORTANTE : Tension minimale de 0.5N même en slack léger
-        // pour maintenir une contrainte géométrique faible (évite dérive totale)
-        // Cette tension résiduelle simule :
-        // - La masse propre des lignes (qui pendent entre treuil et kite)
-        // - La friction de l'air sur les lignes
-        // - Les micro-tensions dues aux vibrations
+        // Un cerf-volant réel :
+        // - Est TOUJOURS sous tension (vent + gravité tirent sur les lignes)
+        // - Ne peut pas "détendre" ses lignes et s'envoler
+        // - Les lignes sont quasi-rigides (allongement < 1%)
         //
-        // Cela permet au cerf-volant de :
-        // ✅ Tomber sous l'effet de la gravité (force dominante)
-        // ✅ Ressentir le vent apparent pendant la chute (forces aéro actives)
-        // ✅ Rester dans l'hémisphère de vol (pas de dérive infinie)
+        // NOUVEAU MODÈLE : Ressort rigide SYMÉTRIQUE
+        // - Extension (distance > repos) → force vers treuil (rappel)
+        // - Compression (distance < repos) → force vers l'extérieur (maintien longueur)
+        // - Transition smooth, pas de discontinuité
         
-        const slackTolerance = 0.05; // 5cm de tolérance avant tension résiduelle
+        const extension = currentDistance - restLength; // Peut être positif ou négatif
         
-        if (currentDistance < restLength - slackTolerance) {
-            // Régime SLACK COMPLET : Ligne vraiment détendue → Tension nulle
-            // Le cerf-volant tombe librement
-            tension = 0;
-        } else if (currentDistance < restLength + 0.01) {
-            // Régime TRANSITION : Proche de la longueur de repos
-            // Tension résiduelle faible (masse des lignes, friction air)
-            const proximityFactor = (currentDistance - (restLength - slackTolerance)) / (slackTolerance + 0.01);
-            tension = this.config.minTension * Math.max(0, Math.min(1, proximityFactor));
+        // Vitesse radiale pour amortissement
+        const radialVelocity = attachVelocity.dot(this.tempVector2);
+        
+        // Force de rappel (symétrique, pas de zone morte)
+        let springForce: number;
+        
+        if (Math.abs(extension) < this.config.exponentialThreshold) {
+            // Zone linéaire : F = k × x (symétrique)
+            springForce = this.config.stiffness * extension;
         } else {
-            // Régime TENDU : Ligne étirée - Modèle HYBRIDE Linéaire-Exponentiel
-            const extension = currentDistance - restLength;
-            
-            // Vitesse radiale
-            const radialVelocity = attachVelocity.dot(this.tempVector2);
-            
-            // Calcul de la force de rappel selon l'extension
-            let springForce: number;
-            
-            if (extension < this.config.exponentialThreshold) {
-                // Zone linéaire : F = k × x
-                springForce = this.config.stiffness * extension;
-            } else {
-                // Zone exponentielle : Protection contre sur-étirement
-                const thresholdForce = this.config.stiffness * this.config.exponentialThreshold;
-                const excessExtension = extension - this.config.exponentialThreshold;
-                const expTerm = Math.exp(this.config.exponentialRate * excessExtension) - 1;
-                springForce = this.config.exponentialStiffness * expTerm + thresholdForce;
-            }
-            
-            // Amortissement : F_damp = c × v
-            const dampingForce = this.config.damping * radialVelocity;
-            
-            tension = springForce + dampingForce;
-            // Ajouter tension minimale (masse lignes + friction)
-            tension = Math.max(this.config.minTension, tension);
+            // Zone exponentielle : Protection contre sur-étirement
+            const sign = Math.sign(extension);
+            const absExtension = Math.abs(extension);
+            const thresholdForce = this.config.stiffness * this.config.exponentialThreshold;
+            const excessExtension = absExtension - this.config.exponentialThreshold;
+            const expTerm = Math.exp(this.config.exponentialRate * excessExtension) - 1;
+            springForce = sign * (this.config.exponentialStiffness * expTerm + thresholdForce);
         }
+        
+        // Amortissement : F_damp = c × v
+        const dampingForce = this.config.damping * radialVelocity;
+        
+        tension = springForce + dampingForce;
+        // Tension minimale (masse lignes + friction) - TOUJOURS présente
+        tension = Math.max(this.config.minTension, Math.abs(tension)) * Math.sign(tension || 1);
         
         // Lissage temporel
         const alpha = this.config.smoothingCoefficient;
